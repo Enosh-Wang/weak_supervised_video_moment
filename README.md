@@ -50,3 +50,9 @@ The updated result of proposed approach on the Charades-STA dataset is below. Pl
 
 
 -- Contact: Niluthpol Chowdhury Mithun (nmith001@ucr.edu)
+
+### 训练
+python train.py --reset_train 
+
+--reset_train 不加会报错
+--resume checkpoint的路径，恢复训练时用

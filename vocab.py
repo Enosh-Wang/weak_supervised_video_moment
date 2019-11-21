@@ -1,6 +1,9 @@
 
 class Vocabulary(object):
-    """Simple vocabulary wrapper."""
+    """
+       Simple vocabulary wrapper.
+       单词到序号的双向映射词典
+    """
 
     def __init__(self):
         self.word2idx = {}

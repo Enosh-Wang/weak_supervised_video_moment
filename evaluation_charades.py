@@ -67,7 +67,7 @@ class LogCollector(object):
     def tb_log(self, tb_logger, prefix='', step=None):
         """Log using tensorboard
         """
-        for k, v in self.meters.iteritems():
+        for k, v in self.meters.items():
             tb_logger.log_value(prefix + k, v.val, step=step)
 
 
@@ -91,7 +91,8 @@ def encode_data(model, data_loader, log_step=10, logging=print):
         model.logger = val_logger
 
         # compute the embeddings
-        img_emb, cap_emb, attn_weight_s = model.forward_emb(images, captions, lengths, lengths_img, volatile=True)
+        with torch.no_grad(): # 替代volatile=True，已弃用
+            img_emb, cap_emb, attn_weight_s = model.forward_emb(images, captions, lengths, lengths_img)
 		
         if(attn_weight_s.size(1)<10):
             attn_weight=torch.zeros(attn_weight_s.size(0),10,attn_weight_s.size(2))
@@ -160,16 +161,23 @@ def evalrank(model_path, data_path=None, split='dev', fold5=False):
     Evaluate a trained model.
     """
     # load model and options
-    checkpoint = torch.load(model_path)
-    opt = checkpoint['opt']
-
+    checkpoint = torch.load(model_path) # “model_best.pth.tar”
+    opt = checkpoint['opt'] 
+    """batch_size=128, cnn_type='vgg19', crop_size=224, data_name='charades_precomp', 
+    data_path='/home/share/wangyunxiao/Charades', embed_size=1024, finetune=False,
+    grad_clip=2.0, img_dim=4096, learning_rate=0.0001, log_step=10, workers=10
+    logger_name='runs/test_cross_attn_charades_c3dvse7_slide2', lr_update=15, margin=0.1, 
+    max_violation=False, measure='cosine', no_imgnorm=False, num_epochs=40, num_layers=1,
+    resume='./runs/test_cross_attn_charades_c3dvse7/model_best.pth.tar', use_abs=False, 
+    use_restval=False, val_step=500, vocab_path='./vocab/', vocab_size=11755, word_dim=300"""
     if data_path is not None:
         opt.data_path = data_path
     opt.vocab_path = "./vocab/"
     # load vocabulary	   
     vocab = pickle.load(open(os.path.join(
         opt.vocab_path, 'vocab.pkl'), 'rb'))
-        
+    # 记得删！！！！！！！！！！！！！！！！
+    print(vocab)
     opt.vocab_size = len(vocab)
 
     # construct model
@@ -207,12 +215,14 @@ def t2i(images, captions, df, attn_index, lengths_img, npts=None, measure='cosin
     Images: (N, K) matrix of images
     Captions: (N, K) matrix of captions
     """
+    # 读取GT
     inds=df['video']
     desc=df['description']
     start_segment=df['start_segment']
     end_segment=df['end_segment']
 	
     if npts is None:
+        # pair的数目？
         npts = images.shape[0]
     ims = numpy.array([images[i] for i in range(0, len(images), 1)])
 
@@ -232,19 +242,28 @@ def t2i(images, captions, df, attn_index, lengths_img, npts=None, measure='cosin
     R10IOU7=0
 	
     for index in range(int(npts)):
+        # index应该是指pair的索引
+        # 匹配结果的排序列表
         att_inds=attn_index[index,:]
+        # 视频的长度
         len_img=lengths_img[index]
+        # 读取GT
         gt_start=start_segment[index]
         gt_end=end_segment[index]
+        # 因为将128和256的滑窗拼接在了一起，所以前2/3的特征是128滑窗的，后1/3的特征是256滑窗的
         break_128=np.floor(len_img*2/3)-1
+        # 起始帧
         rank1_start=att_inds[0]
         if (rank1_start<break_128):
+           # 128的滑窗
            rank1_start_seg =rank1_start*128
            rank1_end_seg = rank1_start_seg+128
         else:
+           # 256的滑窗
            rank1_start_seg =(rank1_start-break_128)*256
            rank1_end_seg = rank1_start_seg+256
-			
+        
+        # 计算IOU
         iou = cIoU((gt_start, gt_end),(rank1_start_seg, rank1_end_seg))
         if iou>=0.5:
            correct_num05+=1
@@ -252,7 +271,7 @@ def t2i(images, captions, df, attn_index, lengths_img, npts=None, measure='cosin
            correct_num07+=1
         if iou>=0.3:
            correct_num03+=1
-		   
+
         for j1 in range(5):
             if (att_inds[j1]<break_128):
                rank1_start_seg =att_inds[j1]*128
