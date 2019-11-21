@@ -3,4 +3,4 @@ test.py
 test_charades/
 __pycache__/
 runs/
-voca/
+vocab/
