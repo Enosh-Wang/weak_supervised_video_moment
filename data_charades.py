@@ -44,12 +44,12 @@ class Charades(data.Dataset):
         # 读取出来就是128的滑窗
         #data_path = '/home/share/wangyunxiao/Charades/CHARADES_C3D/concate_16'
         #video_feat = np.load(os.path.join(data_path,str(inds[index]+'.npy')))
-        # 128 frame features 128帧的滑动窗口 8*16
+        # 128 frame features 128帧的滑动窗口 8*16 shape=(2,4096)
         video_feat1=scikit.block_reduce(video_feat, block_size=(8, 1), func=np.mean)
-        # 256 frame features 256帧的滑动窗口 16*16 
+        # 256 frame features 256帧的滑动窗口 16*16 shape=(4,4096)
         video_feat2=scikit.block_reduce(video_feat, block_size=(16, 1), func=np.mean)
         # concatenation of all 128 frame feature and 256 frame feature
-        # 拼接多尺滑窗
+        # 拼接多尺滑窗 shape = (6,4096)
         video_feat=np.concatenate((video_feat1,video_feat2),axis=0)
 
         # 数组转成tensor
@@ -68,6 +68,7 @@ class Charades(data.Dataset):
         caption.append(vocab('<end>'))
         # 转为tensor
         target = torch.Tensor(caption)
+        # image [6,4096] target [12] index 2059 img_id 2059
         return image, target, index, img_id
 
     def __len__(self):

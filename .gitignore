@@ -4,3 +4,4 @@ test_charades/
 __pycache__/
 runs/
 vocab/
+.vscode/
