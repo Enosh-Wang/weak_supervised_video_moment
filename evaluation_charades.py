@@ -8,10 +8,13 @@ import time
 import numpy as np
 from vocab import Vocabulary 
 import torch
-from model_charades import VSE, order_sim
+from model_charades import VSE
 from collections import OrderedDict
 import pandas
-
+import matplotlib
+matplotlib.use('agg')
+import matplotlib.pyplot as plt
+from torch.utils.tensorboard import SummaryWriter
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
@@ -68,10 +71,14 @@ class LogCollector(object):
         """Log using tensorboard
         """
         for k, v in self.meters.items():
-            tb_logger.log_value(prefix + k, v.val, step=step)
+            tb_logger.add_scalar(prefix + k, v.val, global_step=step)
 
+def cIoU(pred, gt):
+    intersection = max(0, min(pred[1], gt[1]) + 1 - max(pred[0], gt[0]))
+    union = max(pred[1], gt[1]) + 1 - min(pred[0], gt[0])
+    return float(intersection)/union
 
-def encode_data(model, data_loader, log_step=10, logging=print):
+def encode_data(model, data_loader,tb_writer,df, log_step=10, logging=print):
     """Encode all images and captions loadable by `data_loader`
     """
     batch_time = AverageMeter()
@@ -82,36 +89,34 @@ def encode_data(model, data_loader, log_step=10, logging=print):
 
     end = time.time()
 
-    # numpy array to keep all the embeddings
-    img_embs = None
-    cap_embs = None
-    #attn_weights =
-    for i, (images, captions, lengths, lengths_img, ids) in enumerate(data_loader):
+    attention_index = np.zeros((len(data_loader.dataset), 10))
+    rank1_ind = np.zeros((len(data_loader.dataset)))
+    lengths_all = np.zeros((len(data_loader.dataset)))
+
+    for epoch, (images, captions, lengths, lengths_img, ids) in enumerate(data_loader):
         # make sure val logger is used
         model.logger = val_logger
 
         # compute the embeddings
         with torch.no_grad(): # 替代volatile=True，已弃用
-            img_emb, cap_emb, attn_weight_s = model.forward_emb(images, captions, lengths, lengths_img)
+            attn_weights, scores = model.forward_emb(images, captions, lengths, lengths_img)
 		
-        if(attn_weight_s.size(1)<10):
-            attn_weight=torch.zeros(attn_weight_s.size(0),10,attn_weight_s.size(2))
-            attn_weight[:,0:attn_weight_s.size(1),:]=attn_weight_s
+        # 提取对角线元素
+        size = attn_weights.size()
+        attn_weights_diag = torch.zeros(size[0],size[2])
+        for i in range(size[0]):
+            attn_weights_diag[i,:] = attn_weights[i,i,:]
+        # padding
+        if(attn_weights_diag.size(1)<10):
+            attn_weight=torch.zeros(attn_weights_diag.size(0),10)
+            attn_weight[:,0:attn_weights_diag.size(1)]=attn_weights_diag
         else:
-            attn_weight=attn_weight_s
+            attn_weight=attn_weights_diag
 
         batch_length=attn_weight.size(0)
         attn_weight=torch.squeeze(attn_weight)
         
-        # initialize the numpy arrays given the size of the embeddings
-        if img_embs is None:
-            img_embs = np.zeros((len(data_loader.dataset), img_emb.size(1)))
-            cap_embs = np.zeros((len(data_loader.dataset), cap_emb.size(1)))
-            attention_index = np.zeros((len(data_loader.dataset), 10))
-            rank1_ind = np.zeros((len(data_loader.dataset)))
-            lengths_all = np.zeros((len(data_loader.dataset)))
-			
-        
+        # 保留每个batch中每个样本的前十个结果
         attn_index= np.zeros((batch_length, 10)) # Rank 1 to 10
         rank_att1= np.zeros(batch_length)
         temp=attn_weight.data.cpu().numpy().copy()
@@ -122,39 +127,92 @@ def encode_data(model, data_loader, log_step=10, logging=print):
             attn_index[k,:]=sc_ind[0:10]
 	
         # preserve the embeddings by copying from gpu and converting to numpy
-        img_embs[ids] = img_emb.data.cpu().numpy().copy()
-        cap_embs[ids] = cap_emb.data.cpu().numpy().copy()
         attention_index[ids] = attn_index
         lengths_all[ids] = lengths_img
         rank1_ind[ids] = rank_att1
 
         # measure accuracy and record loss
-        model.forward_loss(img_emb, cap_emb)
+        model.forward_loss(scores)
 
         # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
 
-        if i % log_step == 0:
+        if epoch % log_step == 0:
             logging('Test: [{0}/{1}]\t'
                     '{e_log}\t'
                     'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                     .format(
-                        i, len(data_loader), batch_time=batch_time,
+                        epoch, len(data_loader), batch_time=batch_time,
                         e_log=str(model.logger)))
         del images, captions
 
-    return img_embs, cap_embs, attention_index, lengths_all
+        path = os.path.join('img',str(epoch))
+        if not os.path.exists(path):
+            os.makedirs(path)
+        
+        # 读取GT
+        start_segment=df['start_segment']
+        end_segment=df['end_segment']
+        attn_max = torch.max(attn_weight).data
+        for index in range(batch_length):
 
-	
-#def cIoU_old(a,b,prec):
-#    return np.around(1.0*(min(a[1], b[1])-max(a[0], b[0]))/(max(a[1], b[1])-min(a[0], b[0])),decimals=prec)
-	
-	
-def cIoU(pred, gt):
-    intersection = max(0, min(pred[1], gt[1]) + 1 - max(pred[0], gt[0]))
-    union = max(pred[1], gt[1]) + 1 - min(pred[0], gt[0])
-    return float(intersection)/union
+            # 视频的长度
+            len_img=lengths_img[index]
+
+            break_128=np.floor(len_img*2/3)
+
+            gt_start = start_segment[ids[index]]
+            gt_end = end_segment[ids[index]]
+
+            gt_start_128 = gt_start/128.0
+            gt_end_128 = gt_end/128.0
+
+            gt_start_256 = gt_start/256.0 + break_128
+            gt_end_256 = gt_end/256.0 + break_128
+
+
+            # 起始帧
+            rank1_start=rank_att1[index]
+            if (rank1_start<break_128):
+                # 128的滑窗
+                rank1_start_seg =rank1_start*128
+                rank1_end_seg = rank1_start_seg+128
+            else:
+                # 256的滑窗
+                rank1_start_seg =(rank1_start-break_128)*256
+                rank1_end_seg = rank1_start_seg+256
+            
+            
+            f = plt.figure(figsize=(6,4))
+            # 绘制分界线
+            plt.plot([break_128,break_128],[0,attn_max],linestyle=":",color='gray')
+            plt.plot([len_img,len_img],[0,attn_max],linestyle=":",color='gray')
+            # 绘制预测区域
+            plt.plot([rank1_start,rank1_start+1],[attn_max*0.6,attn_max*0.6],linewidth=4,color='darkred')
+            # 绘制GT区域
+            plt.plot([gt_start_128,gt_end_128],[attn_max*0.4,attn_max*0.4],linewidth=4,color='orange')
+            plt.plot([gt_start_256,gt_end_256],[attn_max*0.4,attn_max*0.4],linewidth=4,color='orange')
+            # 绘制得分曲线
+            score = attn_weight[index]
+            x_128 = range(int(break_128))
+            y_128 = score[x_128]
+            plt.plot(x_128,y_128,'g--',marker='o')
+
+            x_256 = range(int(break_128),len_img)
+            y_256 = score[x_256]
+            plt.plot(x_256,y_256,'g--',marker='o')
+
+            iou = cIoU((gt_start,gt_end),(rank1_start_seg,rank1_end_seg))
+            plt.xlabel('len:'+str(len_img)+'  break_128:'+str(break_128)+'  rank1:'+str(rank1_start))
+            plt.title('GT:'+str(int(gt_start))+'-'+str(int(gt_end))
+                    +'  Pre:'+str(int(rank1_start_seg))+'-'+str(int(rank1_end_seg))
+                    +'  IOU:%0.2f'%(iou))
+            plt.savefig(os.path.join(path,str(ids[index])+'.png'))
+            plt.close(f)
+
+    return  attention_index, lengths_all
+
 
 def evalrank(model_path, data_path=None, split='dev', fold5=False):
     """
@@ -163,21 +221,16 @@ def evalrank(model_path, data_path=None, split='dev', fold5=False):
     # load model and options
     checkpoint = torch.load(model_path) # “model_best.pth.tar”
     opt = checkpoint['opt'] 
-    """batch_size=128, cnn_type='vgg19', crop_size=224, data_name='charades_precomp', 
-    data_path='/home/share/wangyunxiao/Charades', embed_size=1024, finetune=False,
-    grad_clip=2.0, img_dim=4096, learning_rate=0.0001, log_step=10, workers=10
-    logger_name='runs/test_cross_attn_charades_c3dvse7_slide2', lr_update=15, margin=0.1, 
-    max_violation=False, measure='cosine', no_imgnorm=False, num_epochs=40, num_layers=1,
-    resume='./runs/test_cross_attn_charades_c3dvse7/model_best.pth.tar', use_abs=False, 
-    use_restval=False, val_step=500, vocab_path='./vocab/', vocab_size=11755, word_dim=300"""
+
+    tb_writer = SummaryWriter(opt.logger_name, flush_secs=5)
+
     if data_path is not None:
         opt.data_path = data_path
     opt.vocab_path = "./vocab/"
     # load vocabulary	   
     vocab = pickle.load(open(os.path.join(
         opt.vocab_path, 'vocab.pkl'), 'rb'))
-    # 记得删！！！！！！！！！！！！！！！！
-    print(vocab)
+
     opt.vocab_size = len(vocab)
 
     # construct model
@@ -190,46 +243,31 @@ def evalrank(model_path, data_path=None, split='dev', fold5=False):
     ####### input video files
     path= os.path.join(opt.data_path, opt.data_name)+"/Caption/charades_"+ str(split) + ".csv"
     df=pandas.read_csv(open(path,'rb'))
-    #columns=df.columns
-    inds=df['video']
-    desc=df['description']
 
     print('Loading dataset')
     data_loader = get_test_loader(split, opt.data_name, vocab, opt.crop_size,
                                   opt.batch_size, opt.workers, opt)
 
     print('Computing results...')
-    img_embs, cap_embs, attn_index, lengths_img = encode_data(model, data_loader)
-
-    print(img_embs.shape)
-    print(cap_embs.shape)
-    print('Images: %d, Captions: %d' %
-          (img_embs.shape[0], cap_embs.shape[0]))
+    attn_index, lengths_img = encode_data(model, data_loader,tb_writer,df)
 
 	# retrieve moments
-    r13, r15, r17 = t2i(img_embs, cap_embs, df, attn_index, lengths_img, measure=opt.measure, return_ranks=True)
-		
-def t2i(images, captions, df, attn_index, lengths_img, npts=None, measure='cosine', return_ranks=False):
+    _, _, _ = t2i(df, attn_index, lengths_img)
+
+def t2i( df, attn_index, lengths_img, npts=None):
     """
     Text->Images (Image Search)
     Images: (N, K) matrix of images
     Captions: (N, K) matrix of captions
     """
     # 读取GT
-    inds=df['video']
-    desc=df['description']
     start_segment=df['start_segment']
     end_segment=df['end_segment']
 	
     if npts is None:
         # pair的数目？
-        npts = images.shape[0]
-    ims = numpy.array([images[i] for i in range(0, len(images), 1)])
+        npts = attn_index.shape[0]
 
-    ranks = numpy.zeros(int(npts))
-    top1 = numpy.zeros(int(npts))
-    average_ranks = []
-    average_iou = []
     correct_num05=0
     correct_num07=0
     correct_num03=0
@@ -359,7 +397,7 @@ def t2i(images, captions, df, attn_index, lengths_img, npts=None, measure='cosin
     R1IoU05=correct_num05
     R1IoU07=correct_num07
     R1IoU03=correct_num03
-    total_length=images.shape[0]
+    total_length=attn_index.shape[0]
     #print('total length',total_length)
     print("R@1 IoU0.3: %f" %(R1IoU03/float(total_length)))
     print("R@5 IoU0.3: %f" %(R5IOU3/float(total_length)))

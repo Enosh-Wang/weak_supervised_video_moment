@@ -18,115 +18,19 @@ def l2norm(X):
     return X
 
 
-def EncoderImage(data_name, img_dim, embed_size, finetune=False,
-                 cnn_type='vgg19', use_abs=False, no_imgnorm=False):
-    """A wrapper to image encoders. Chooses between an encoder that uses
-    precomputed image features, `EncoderImagePrecomp`, or an encoder that
-    computes image features on the fly `EncoderImageFull`. We used Precomp
-    """
-    #print img_dim
-    if data_name.endswith('_precomp'):
-        img_enc = EncoderImagePrecomp(
-            img_dim, embed_size, use_abs, no_imgnorm)
-    else:
-        img_enc = EncoderImageFull(
-            embed_size, finetune, cnn_type, use_abs, no_imgnorm)
-
-    return img_enc
-
-
-# tutorials/09 - Image Captioning
-class EncoderImageFull(nn.Module):
-
-    def __init__(self, embed_size, finetune=False, cnn_type='vgg19',
-                 use_abs=False, no_imgnorm=False):
-        """Load pretrained VGG19 and replace top fc layer."""
-        super(EncoderImageFull, self).__init__()
-        self.embed_size = embed_size
-        self.no_imgnorm = no_imgnorm
-        self.use_abs = use_abs
-
-        # Load a pre-trained model
-        self.cnn = self.get_cnn(cnn_type, True)
-
-        # For efficient memory usage.
-        for param in self.cnn.parameters():
-            param.requires_grad = finetune
-
-        # Replace the last fully connected layer of CNN with a new one
-        # 把最后一个FC层换成了空的，用self.fc替代
-        if cnn_type.startswith('vgg'):
-            self.fc = nn.Linear(self.cnn.classifier._modules['6'].in_features,
-                                embed_size)
-            self.cnn.classifier = nn.Sequential(
-                *list(self.cnn.classifier.children())[:-1])
-        elif cnn_type.startswith('resnet'):
-            self.fc = nn.Linear(self.cnn.module.fc.in_features, embed_size)
-            self.cnn.module.fc = nn.Sequential()
-
-        self.init_weights()
-
-    def get_cnn(self, arch, pretrained):
-        """Load a pretrained CNN and parallelize over GPUs
-        """
-        if pretrained:
-            #print("=> using pre-trained model '{}'".format(arch))
-            # 一个可以学习的小技巧，用.__dict__属性实现通过变量选择模型
-            model = models.__dict__[arch](pretrained=True)
-        else:
-            #print("=> creating model '{}'".format(arch))
-            model = models.__dict__[arch]()
-
-        if arch.startswith('alexnet') or arch.startswith('vgg'):
-            # 多GPU并行运算
-            model.features = nn.DataParallel(model.features)
-            # 将模型放到GPU上运行
-            model.cuda()
-        else:
-            model = nn.DataParallel(model).cuda()
-
-        return model
-
-    def init_weights(self):
-        """Xavier initialization for the fully connected layer
-        """
-        r = np.sqrt(6.) / np.sqrt(self.fc.in_features +
-                                  self.fc.out_features)
-        # 均匀分布、0填充
-        self.fc.weight.data.uniform_(-r, r)
-        self.fc.bias.data.fill_(0)
-
-    def forward(self, images):
-        """Extract image feature vectors."""
-        features = self.cnn(images)
-
-        # normalization in the image embedding space
-        features = l2norm(features)
-
-        # linear projection to the joint embedding space
-        features = self.fc(features)
-
-        # normalization in the joint embedding space
-        if not self.no_imgnorm:
-            features = l2norm(features)
-
-        # take the absolute value of the embedding (used in order embeddings)
-        if self.use_abs:
-            features = torch.abs(features)
-
-        return features
-
-		
-		
-
 def cross_attention(x1, x2, dim=2):
     """Returns cosine similarity based attention between x1 and x2, computed along dim."""
-    # batch 矩阵相乘
-    w1=torch.bmm(x1, x2.unsqueeze(2))
+    # 原始代码
+    # batch 矩阵相乘 x1[128,26,1024] x2[128,1024] w1[128,26,1]
+    # w1=torch.bmm(x1, x2.unsqueeze(2))
+    # <!-改为MIL
+    batch_size = x1.size()[0]
+    x2 = x2.repeat(batch_size,1,1) # [128,128,1024]
+    x1 = x1.permute(0,2,1) # [128,1024,14]
+    w1 = torch.bmm(x2,x1) # [128,128,14]
     return w1
 	
 	
-		
 class EncoderImagePrecomp(nn.Module):
 
     def __init__(self, img_dim, embed_size, use_abs=False,no_imgnorm=False):
@@ -136,7 +40,7 @@ class EncoderImagePrecomp(nn.Module):
         self.use_abs = use_abs
 			
         self.ws1 = nn.Linear(img_dim, embed_size)
-        self.softmax = nn.Softmax(0)
+        self.softmax = nn.Softmax(dim=2)
         self.fc = nn.Linear(embed_size, embed_size)	
 
         self.init_weights()
@@ -162,9 +66,10 @@ class EncoderImagePrecomp(nn.Module):
 
     def forward(self, images, cap_embs,lengths_img):
         """Extract image feature vectors."""
+        # cap_embs.shape=[128,1024]
         # assuming that the precomputed features are already l2-normalized
         # 前面的作用是将视频特征映射到联合空间
-        size = images.size() # [128, 14, 4096] 
+        #size = images.size() # [128, 14, 4096] 
 
         '''待调试代码区'''
         #images_trans = self.trans(images)
@@ -175,20 +80,40 @@ class EncoderImagePrecomp(nn.Module):
         #images_feature = self.norm(images_feature)
 
         image_feature=self.ws1(images) # weight [4096, 1024] feature [128, 14, 1024]
+        #size = image_feature.size()
         attn_weights=cross_attention(image_feature, cap_embs, dim=2)
-
-        att_weights_s=torch.zeros(attn_weights.shape)
-		
-        # zero padding?
-        for i in range(size[0]):
-            temp=self.softmax(attn_weights[i,0:lengths_img[i],:])
-            att_weights_s[i,0:lengths_img[i],:] = temp.data
-        # 下面部分代码的作用实现 Text-guided attention，可以结合论文来看
-        attn_weights=Variable(att_weights_s.cuda())
-        out=torch.bmm(image_feature.transpose(1,2),attn_weights)
-
-        out=torch.squeeze(out)
+        #attn_weights = self.softmax(attn_weights)
+        size = attn_weights.size()
+        mask=torch.zeros(size).cuda()
+        # 原版attn_weights[128,14,1] 在clip维度上执行softmax
         
+        for i in range(size[0]):
+            for j in range(size[1]):
+                #temp=self.softmax(attn_weights[i,j,0:lengths_img[i]])
+                mask[i,j,lengths_img[i]:] = float('-inf')
+        # 下面部分代码的作用实现 Text-guided attention，可以结合论文来看
+        # attn_weights_s.requires_grad_()
+        # attn_weights=attn_weights_s.cuda()
+        attn_weights_mask = attn_weights + mask
+        attn_weights_soft = self.softmax(attn_weights_mask)
+        # img_feature=[128,26,1024] attn_weight=[128,26,1]
+        
+        # 原版代码
+        # out=torch.bmm(image_feature.transpose(1,2),attn_weights)
+
+        # <!-改用max的代码
+        #max_index = attn_weights.argmax(dim=1)
+        #max_index = torch.squeeze(max_index)
+        #out = torch.zeros(size[0],size[2]).cuda()
+        #for i in range(size[0]):
+        #    out[i] = image_feature[i,max_index[i],:]
+        # 改用max的代码-!>
+
+        # <!- 改用MIL的代码
+        scores = torch.max(attn_weights_soft,2)[0]
+        # 改用MIL的代码 -!>
+        '''
+        # out [128,1024]
         features = self.fc(out)
 
         # normalize in the joint embedding space
@@ -200,6 +125,8 @@ class EncoderImagePrecomp(nn.Module):
             features = torch.abs(features)
 
         return features, attn_weights
+        '''
+        return scores,attn_weights_soft
 
     def load_state_dict(self, state_dict):
         """Copies parameters. overwritting the default one to
@@ -299,25 +226,17 @@ class ContrastiveLoss(nn.Module):
 
         self.max_violation = max_violation
 
-    def forward(self, im, s):
-        # compute image-sentence score matrix
-        scores = self.sim(im, s)
-        ##print('scores')
+    def forward(self,scores):
         # 取对角线元素 2D -> 1D
         # view的作用类似reshape
-        diagonal = scores.diag().view(im.size(0), 1)
+        diagonal = scores.diag().view(scores.size(0), 1)
         # 扩展成与scores相同的大小
         d1 = diagonal.expand_as(scores)
         d2 = diagonal.t().expand_as(scores)
         
         # compare every diagonal score to scores in its column
         # caption retrieval
-        '''
-        clamp():
-              | min, if x_i < min
-        y_i = | x_i, if min <= x_i <= max
-              | max, if x_i > max
-        '''
+
         cost_s = (self.margin + scores - d1).clamp(min=0)
 
         # compare every diagonal score to scores in its row
@@ -338,7 +257,10 @@ class ContrastiveLoss(nn.Module):
         if self.max_violation:
             cost_s = cost_s.max(1)[0]
             cost_im = cost_im.max(0)[0]
-
+        # 时间平滑项
+        lambda_1 = 8e-5
+        #cost_1 = 
+        # 时间稀疏项
         return cost_s.sum() + cost_im.sum()
 
 class VSE(object):
@@ -350,8 +272,7 @@ class VSE(object):
         # tutorials/09 - Image Captioning
         # Build Models
         self.grad_clip = opt.grad_clip
-        self.img_enc = EncoderImage(opt.data_name, opt.img_dim, opt.embed_size,
-                                    opt.finetune, opt.cnn_type,
+        self.img_enc = EncoderImagePrecomp(opt.img_dim, opt.embed_size,
                                     use_abs=opt.use_abs,
                                     no_imgnorm=opt.no_imgnorm)
         self.txt_enc = EncoderText(opt.vocab_size, opt.word_dim,
@@ -363,15 +284,15 @@ class VSE(object):
             cudnn.benchmark = True
 
         # Loss and Optimizer
+
         self.criterion = ContrastiveLoss(margin=opt.margin,
                                          measure=opt.measure,
                                          max_violation=opt.max_violation)
+
         # 要优化的参数
         # 文本部分主要是embedding和GRU，图片部分只有一个FC
         params = list(self.txt_enc.parameters())
         params += list(self.img_enc.fc.parameters())
-        if opt.finetune:
-            params += list(self.img_enc.cnn.parameters())
         self.params = params
 
         self.optimizer = torch.optim.Adam(params, lr=opt.learning_rate)
@@ -418,9 +339,12 @@ class VSE(object):
         cap_init_emb = self.txt_enc(captions, lengths)
         # 主要有两个FC和一个Text-Guide Attention
         # 实验：加入self-attention
-        img_emb, attn_weights = self.img_enc(images,cap_init_emb,lengths_img)
-        cap_emb=cap_init_emb
-        return img_emb, cap_emb, attn_weights
+        #img_emb, attn_weights = self.img_enc(images,cap_init_emb,lengths_img)
+        # [128,128]
+        scores, attn_weights = self.img_enc(images,cap_init_emb,lengths_img)
+        #cap_emb=cap_init_emb
+        #return img_emb, cap_emb, attn_weights
+        return  attn_weights, scores
 
     # 删除了volatile
     def forward_emb_image(self, images):
@@ -448,30 +372,35 @@ class VSE(object):
         # Forward
         cap_emb = self.txt_enc(captions, lengths)
         return cap_emb
-		
+    '''
     def forward_loss(self, img_emb, cap_emb, **kwargs):
         """Compute the loss given pairs of image and caption embeddings
         """
         loss = self.criterion(img_emb, cap_emb)
         self.logger.update('Le', loss.data, img_emb.size(0))
         return loss
-
+    '''
+    def forward_loss(self, scores, **kwargs):
+        """Compute the loss given pairs of image and caption embeddings
+        """
+        loss = self.criterion(scores)
+        self.logger.update('loss', loss.data, scores.size(0))
+        return loss
     def train_emb(self, images, captions, lengths, lengths_img, ids=None, *args):
         """One training step given images and captions.
            输入依次是一个batch的padding后的视频、padding后的文本，文本的单词数目，视频的滑窗数目，pair的序号
         """
         ##print(ids)
         self.Eiters += 1
-        self.logger.update('Eit', self.Eiters)
         self.logger.update('lr', self.optimizer.param_groups[0]['lr'])
 
         # compute the embeddings
-        img_emb, cap_emb, attn_weights = self.forward_emb(images, captions, lengths, lengths_img)
-
+        #img_emb, cap_emb, attn_weights = self.forward_emb(images, captions, lengths, lengths_img)
+        _,scores = self.forward_emb(images, captions, lengths, lengths_img)
         # measure accuracy and record loss
         self.optimizer.zero_grad()
-        loss = self.forward_loss(img_emb, cap_emb)
-
+        #loss = self.forward_loss(img_emb, cap_emb)
+        loss = self.forward_loss(scores)
         # compute gradient and do SGD step
         loss.backward()
         if self.grad_clip > 0:
