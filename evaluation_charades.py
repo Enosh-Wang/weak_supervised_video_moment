@@ -132,7 +132,7 @@ def encode_data(model, data_loader,tb_writer,df, log_step=10, logging=print):
         rank1_ind[ids] = rank_att1
 
         # measure accuracy and record loss
-        model.forward_loss(scores)
+        model.forward_loss(scores,attn_weights,lengths_img)
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -146,7 +146,8 @@ def encode_data(model, data_loader,tb_writer,df, log_step=10, logging=print):
                         epoch, len(data_loader), batch_time=batch_time,
                         e_log=str(model.logger)))
         del images, captions
-
+        '''
+        # 绘图
         path = os.path.join('img',str(epoch))
         if not os.path.exists(path):
             os.makedirs(path)
@@ -210,7 +211,7 @@ def encode_data(model, data_loader,tb_writer,df, log_step=10, logging=print):
                     +'  IOU:%0.2f'%(iou))
             plt.savefig(os.path.join(path,str(ids[index])+'.png'))
             plt.close(f)
-
+        '''
     return  attention_index, lengths_all
 
 

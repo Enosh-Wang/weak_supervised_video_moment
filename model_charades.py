@@ -226,7 +226,7 @@ class ContrastiveLoss(nn.Module):
 
         self.max_violation = max_violation
 
-    def forward(self,scores):
+    def forward(self,scores,attn_weights,lengths_img):
         # 取对角线元素 2D -> 1D
         # view的作用类似reshape
         diagonal = scores.diag().view(scores.size(0), 1)
@@ -257,11 +257,24 @@ class ContrastiveLoss(nn.Module):
         if self.max_violation:
             cost_s = cost_s.max(1)[0]
             cost_im = cost_im.max(0)[0]
+        
         # 时间平滑项
         lambda_1 = 8e-5
-        #cost_1 = 
+        size = attn_weights.size()
+        cost_smooth = Variable(torch.zeros(size[0],size[2]),requires_grad = True)
+        cost_smooth = cost_smooth.cuda()
+        for i in range(size[0]):
+            a = range(lengths_img[i]-1)
+            b = range(1,lengths_img[i])
+            cost_smooth[i,:lengths_img[i]-1] = attn_weights[i,i,a]-attn_weights[i,i,b]
         # 时间稀疏项
-        return cost_s.sum() + cost_im.sum()
+        lambda_2 = 8e-5
+        cost_sparse = Variable(torch.zeros(size[0],size[2]),requires_grad = True)
+        cost_sparse = cost_sparse.cuda()
+        for i in range(size[0]):
+            cost_sparse[i,:lengths_img[i]] = attn_weights[i,i,:lengths_img[i]]
+        
+        return cost_s.sum() + cost_im.sum() + lambda_1*cost_smooth.pow(2).sum() + lambda_2*cost_sparse.sum()
 
 class VSE(object):
     """
@@ -380,10 +393,10 @@ class VSE(object):
         self.logger.update('Le', loss.data, img_emb.size(0))
         return loss
     '''
-    def forward_loss(self, scores, **kwargs):
+    def forward_loss(self, scores,attn_weights,lengths_img, **kwargs):
         """Compute the loss given pairs of image and caption embeddings
         """
-        loss = self.criterion(scores)
+        loss = self.criterion(scores,attn_weights,lengths_img)
         self.logger.update('loss', loss.data, scores.size(0))
         return loss
     def train_emb(self, images, captions, lengths, lengths_img, ids=None, *args):
@@ -396,11 +409,11 @@ class VSE(object):
 
         # compute the embeddings
         #img_emb, cap_emb, attn_weights = self.forward_emb(images, captions, lengths, lengths_img)
-        _,scores = self.forward_emb(images, captions, lengths, lengths_img)
+        attn_weights,scores = self.forward_emb(images, captions, lengths, lengths_img)
         # measure accuracy and record loss
         self.optimizer.zero_grad()
         #loss = self.forward_loss(img_emb, cap_emb)
-        loss = self.forward_loss(scores)
+        loss = self.forward_loss(scores,attn_weights,lengths_img)
         # compute gradient and do SGD step
         loss.backward()
         if self.grad_clip > 0:
