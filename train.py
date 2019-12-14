@@ -243,5 +243,5 @@ def accuracy(output, target, topk=(1,)):
 
 
 if __name__ == '__main__':
-    #os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "3"
     main()

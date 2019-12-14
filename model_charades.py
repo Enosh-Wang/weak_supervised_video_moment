@@ -2,13 +2,12 @@ import torch
 import torch.nn as nn
 import torch.nn.init
 import torchvision.models as models
-from torch.autograd import Variable
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 import torch.backends.cudnn as cudnn
 from torch.nn.utils.clip_grad import clip_grad_norm
 import numpy as np
 from collections import OrderedDict
-
+import math
 
 def l2norm(X):
     """L2-normalize columns of X
@@ -30,7 +29,29 @@ def cross_attention(x1, x2, dim=2):
     w1 = torch.bmm(x2,x1) # [128,128,14]
     return w1
 	
-	
+class PositionalEncoding(nn.Module):
+    "Implement the PE function."
+
+    def __init__(self, d_model, dropout, max_len=100):
+        super(PositionalEncoding, self).__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        # Compute the positional encodings once in log space.
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0., max_len).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0., d_model, 2) *
+                             -(math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0) #[1,max_len,d_model]
+        self.register_buffer('pe', pe)
+
+    def forward(self, x): # video : [batch_size,len,d_model]
+        #x = x + self.pe[:, :x.size(1)]
+        p = self.pe[:, :x.size(1)].repeat(x.size(0),1,1)
+        x = torch.cat((x,p),dim = 2)
+        return self.dropout(x)
+
 class EncoderImagePrecomp(nn.Module):
 
     def __init__(self, img_dim, embed_size, use_abs=False,no_imgnorm=False):
@@ -39,11 +60,12 @@ class EncoderImagePrecomp(nn.Module):
         self.no_imgnorm = no_imgnorm
         self.use_abs = use_abs
 			
-        self.ws1 = nn.Linear(img_dim, embed_size)
+        self.ws1 = nn.Linear(img_dim*5, embed_size)
         self.softmax = nn.Softmax(dim=2)
         self.fc = nn.Linear(embed_size, embed_size)	
 
         self.init_weights()
+        self.positional_encoding = PositionalEncoding(d_model = 4096,dropout=0,max_len=100)
 
         # 修改
         #self.trans = nn.TransformerEncoderLayer(d_model=img_dim, nhead=1,dim_feedforward=4096)
@@ -78,7 +100,7 @@ class EncoderImagePrecomp(nn.Module):
         #images_feature = self.self_atten(images,images,images)[0]+images
         #images_feature = self.dropout(images_feature)+images
         #images_feature = self.norm(images_feature)
-
+        images = self.positional_encoding(images)
         image_feature=self.ws1(images) # weight [4096, 1024] feature [128, 14, 1024]
         #size = image_feature.size()
         attn_weights=cross_attention(image_feature, cap_embs, dim=2)
@@ -182,7 +204,8 @@ class EncoderText(nn.Module):
         # Reshape *final* output to (batch_size, hidden_size)
         padded = pad_packed_sequence(out, batch_first=True)
         I = torch.LongTensor(lengths).view(-1, 1, 1) # view的作用类似reshape
-        I = Variable(I.expand(x.size(0), 1, self.embed_size)-1).cuda()
+        I = I.expand(x.size(0), 1, self.embed_size)-1
+        I = I.cuda()
         out = torch.gather(padded[0], 1, I).squeeze(1)
 
         # normalization in the joint embedding space
@@ -246,7 +269,7 @@ class ContrastiveLoss(nn.Module):
         # clear diagonals
         # eye:返回一个2维张量，对角线位置全1，其它位置全0
         mask = torch.eye(scores.size(0)) > .5
-        I = Variable(mask)
+        I = mask
         if torch.cuda.is_available():
             I = I.cuda()
         # masked_fill_:在mask值为1的位置处用value填充。mask的元素个数需和本tensor相同，但尺寸可以不同。
@@ -257,7 +280,7 @@ class ContrastiveLoss(nn.Module):
         if self.max_violation:
             cost_s = cost_s.max(1)[0]
             cost_im = cost_im.max(0)[0]
-        
+        '''
         # 时间平滑项
         lambda_1 = 8e-5
         size = attn_weights.size()
@@ -273,8 +296,8 @@ class ContrastiveLoss(nn.Module):
         cost_sparse = cost_sparse.cuda()
         for i in range(size[0]):
             cost_sparse[i,:lengths_img[i]] = attn_weights[i,i,:lengths_img[i]]
-        
-        return cost_s.sum() + cost_im.sum() + lambda_1*cost_smooth.pow(2).sum() + lambda_2*cost_sparse.sum()
+        '''
+        return cost_s.sum() + cost_im.sum() #+ lambda_1*cost_smooth.pow(2).sum() + lambda_2*cost_sparse.abs().sum()
 
 class VSE(object):
     """
@@ -341,8 +364,8 @@ class VSE(object):
         """
         # Set mini-batch dataset
         # 封装数据类型
-        images = Variable(images)
-        captions = Variable(captions)
+        #images = Variable(images)
+        #captions = Variable(captions)
         if torch.cuda.is_available():
             images = images.cuda()
             captions = captions.cuda()
@@ -364,7 +387,7 @@ class VSE(object):
         """Compute the image and caption embeddings
         """
         # Set mini-batch dataset
-        images = Variable(images)
+        #images = Variable(images)
 
         if torch.cuda.is_available():
             images = images.cuda()
@@ -378,7 +401,7 @@ class VSE(object):
     def forward_emb_caption(self, captions, lengths):
         #"""Compute the image and caption embeddings"""
         # Set mini-batch dataset
-        captions = Variable(captions)
+        #captions = Variable(captions)
         if torch.cuda.is_available():
             captions = captions.cuda()
 

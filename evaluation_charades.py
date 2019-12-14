@@ -93,6 +93,15 @@ def encode_data(model, data_loader,tb_writer,df, log_step=10, logging=print):
     rank1_ind = np.zeros((len(data_loader.dataset)))
     lengths_all = np.zeros((len(data_loader.dataset)))
 
+    pre_128 = 0
+    pre_256 = 0
+    gt_128 = 0
+    gt_256 = 0
+    too_small = 0
+    too_large = 0
+    local_max = 0
+    small_std = 0
+
     for epoch, (images, captions, lengths, lengths_img, ids) in enumerate(data_loader):
         # make sure val logger is used
         model.logger = val_logger
@@ -146,7 +155,7 @@ def encode_data(model, data_loader,tb_writer,df, log_step=10, logging=print):
                         epoch, len(data_loader), batch_time=batch_time,
                         e_log=str(model.logger)))
         del images, captions
-        '''
+        
         # 绘图
         path = os.path.join('img',str(epoch))
         if not os.path.exists(path):
@@ -156,35 +165,89 @@ def encode_data(model, data_loader,tb_writer,df, log_step=10, logging=print):
         start_segment=df['start_segment']
         end_segment=df['end_segment']
         attn_max = torch.max(attn_weight).data
+        attn_weight = attn_weight.data.cpu().numpy().copy()
         for index in range(batch_length):
 
             # 视频的长度
             len_img=lengths_img[index]
 
-            break_128=np.floor(len_img*2/3)
+            break_128=int(np.floor(len_img*2/3))
 
             gt_start = start_segment[ids[index]]
             gt_end = end_segment[ids[index]]
 
-            gt_start_128 = gt_start/128.0
-            gt_end_128 = gt_end/128.0
+            # 计算GT和所有滑窗的iou
+            start_128 = range(break_128)
+            end_128 = range(1,int(break_128+1))
+            start_256 = range(int(len_img-break_128))
+            end_256 = range(1,int(len_img-break_128+1))
+            iou_list=[]
+            for start,end in zip(start_128,end_128):
+                iou = cIoU((gt_start,gt_end),(start*128,end*128))
+                iou_list.append(iou)
+            for start,end in zip(start_256,end_256):
+                iou = cIoU((gt_start,gt_end),(start*256,end*256))
+                iou_list.append(iou)
+            iou_array = np.array(iou_list)
+            iou_max = np.argmax(iou_array)
 
-            gt_start_256 = gt_start/256.0 + break_128
-            gt_end_256 = gt_end/256.0 + break_128
+            # 统计128窗口的得分分布情况
+            # 标准差
+            score = attn_weight[index]
+            score_128 = score[:break_128]
+            score_std = np.std(score_128)
+            if score_std < 0.025 :
+                small_std += 1
+
+            # 局部最大值
+            score_128_argmax = np.argmax(score_128)
+            score_128_max = np.max(score_128)
+            local_max_cnt = 0
+            for i in range(break_128):
+                if i == score_128_argmax:
+                    continue
+                elif i == 0 :
+                    if score_128[0] > score_128[1] and score_128[0] > score_128_max-0.05:
+                        local_max_cnt += 1
+                elif i == break_128-1:
+                    if score_128[break_128-1] > score_128[break_128-2] and score_128[break_128-1] > score_128_max-0.05:
+                        local_max_cnt += 1
+                else:
+                    if score_128[i] > score_128[i-1] and score_128[i] > score_128[i+1] and score_128[i] > score_128_max-0.05:
+                        local_max_cnt += 1
+            if local_max_cnt > 0:
+                local_max += 1
 
 
             # 起始帧
             rank1_start=rank_att1[index]
             if (rank1_start<break_128):
                 # 128的滑窗
+                pre_128 += 1
                 rank1_start_seg =rank1_start*128
                 rank1_end_seg = rank1_start_seg+128
             else:
                 # 256的滑窗
+                pre_256 += 1
                 rank1_start_seg =(rank1_start-break_128)*256
                 rank1_end_seg = rank1_start_seg+256
-            
-            
+
+            if iou_max < break_128 :
+                gt_128 += 1
+                gt_start_plt = gt_start/128.0
+                gt_end_plt = gt_end/128.0
+            else:
+                gt_256 += 1
+                gt_start_plt = gt_start/256.0 + break_128
+                gt_end_plt = gt_end/256.0 + break_128
+
+            if iou_max < break_128:
+                if rank1_start >= break_128:
+                    too_large += 1
+            else:
+                if rank1_start < break_128:
+                    too_small += 1
+
             f = plt.figure(figsize=(6,4))
             # 绘制分界线
             plt.plot([break_128,break_128],[0,attn_max],linestyle=":",color='gray')
@@ -192,26 +255,26 @@ def encode_data(model, data_loader,tb_writer,df, log_step=10, logging=print):
             # 绘制预测区域
             plt.plot([rank1_start,rank1_start+1],[attn_max*0.6,attn_max*0.6],linewidth=4,color='darkred')
             # 绘制GT区域
-            plt.plot([gt_start_128,gt_end_128],[attn_max*0.4,attn_max*0.4],linewidth=4,color='orange')
-            plt.plot([gt_start_256,gt_end_256],[attn_max*0.4,attn_max*0.4],linewidth=4,color='orange')
+            plt.plot([gt_start_plt,gt_end_plt],[attn_max*0.4,attn_max*0.4],linewidth=4,color='orange')
             # 绘制得分曲线
-            score = attn_weight[index]
-            x_128 = range(int(break_128))
+
+            x_128 = range(break_128)
             y_128 = score[x_128]
             plt.plot(x_128,y_128,'g--',marker='o')
 
-            x_256 = range(int(break_128),len_img)
+            x_256 = range(break_128,len_img)
             y_256 = score[x_256]
             plt.plot(x_256,y_256,'g--',marker='o')
 
             iou = cIoU((gt_start,gt_end),(rank1_start_seg,rank1_end_seg))
-            plt.xlabel('len:'+str(len_img)+'  break_128:'+str(break_128)+'  rank1:'+str(rank1_start))
-            plt.title('GT:'+str(int(gt_start))+'-'+str(int(gt_end))
-                    +'  Pre:'+str(int(rank1_start_seg))+'-'+str(int(rank1_end_seg))
-                    +'  IOU:%0.2f'%(iou))
+            plt.xlabel('len: %d,  break_128: %d,  rank1: %d,  std: %0.3f,  local_max: %d'
+                        %(len_img,break_128,rank1_start,score_std,local_max_cnt))
+            plt.title('GT: %d-%d,  Pre: %d-%d,  IOU: %0.2f'%(gt_start,gt_end,rank1_start_seg,rank1_end_seg,iou))
             plt.savefig(os.path.join(path,str(ids[index])+'.png'))
             plt.close(f)
-        '''
+        
+    print('pre_128: %d,  pre_256: %d,  gt_128: %d,  gt_256: %d,  too_small: %d,  too_large: %d,  small_std: %d,  local_max: %d'
+        %(pre_128,pre_256,gt_128,gt_256,too_small,too_large,small_std,local_max))
     return  attention_index, lengths_all
 
 
