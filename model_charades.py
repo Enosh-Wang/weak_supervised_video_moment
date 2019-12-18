@@ -44,6 +44,7 @@ class PositionalEncoding(nn.Module):
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
         pe = pe.unsqueeze(0) #[1,max_len,d_model]
+        
         self.register_buffer('pe', pe)
 
     def forward(self, x): # video : [batch_size,len,d_model]
@@ -60,7 +61,7 @@ class EncoderImagePrecomp(nn.Module):
         self.no_imgnorm = no_imgnorm
         self.use_abs = use_abs
 			
-        self.ws1 = nn.Linear(img_dim*5, embed_size)
+        self.ws1 = nn.Linear(img_dim*4, embed_size)
         self.softmax = nn.Softmax(dim=2)
         self.fc = nn.Linear(embed_size, embed_size)	
 
@@ -100,7 +101,8 @@ class EncoderImagePrecomp(nn.Module):
         #images_feature = self.self_atten(images,images,images)[0]+images
         #images_feature = self.dropout(images_feature)+images
         #images_feature = self.norm(images_feature)
-        images = self.positional_encoding(images)
+
+        #images = self.positional_encoding(images)
         image_feature=self.ws1(images) # weight [4096, 1024] feature [128, 14, 1024]
         #size = image_feature.size()
         attn_weights=cross_attention(image_feature, cap_embs, dim=2)

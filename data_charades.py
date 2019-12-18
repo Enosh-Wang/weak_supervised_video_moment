@@ -49,6 +49,7 @@ class Charades(data.Dataset):
         # 256 frame features 256帧的滑动窗口 16*16 shape=(4,4096)
         video_feat2=scikit.block_reduce(video_feat, block_size=(16, 1), func=np.mean)
         # 添加上下文信息
+        
         video_feat_global = np.mean(video_feat,axis=0,keepdims=True)
 
         feat1_length = len(video_feat1)
@@ -73,7 +74,11 @@ class Charades(data.Dataset):
         video_feat2_context = np.concatenate((video_feat2_left,video_feat2,video_feat2_right,video_feat2_global),axis=1)
         # concatenation of all 128 frame feature and 256 frame feature
         # 拼接多尺滑窗 shape = (6,4096)
+        
         video_feat=np.concatenate((video_feat1_context,video_feat2_context),axis=0)
+        
+        #video_feat=np.concatenate((video_feat1,video_feat2),axis=0)
+
 
         # 数组转成tensor
         image = torch.Tensor(video_feat)

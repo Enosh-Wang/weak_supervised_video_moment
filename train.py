@@ -194,7 +194,7 @@ def validate(opt, val_loader, model, tb_writer):
     df = pandas.read_csv(open(path,'rb'))
 
     #img_embs, cap_embs, attn_index, lengths_img = encode_data(model, val_loader)
-    attn_index, lengths_img = encode_data(model, val_loader,tb_writer,df)
+    attn_index, lengths_img = encode_data(model, val_loader,tb_writer,df,is_training=True)
     # image retrieval
     r13, r15, r17 = t2i(df, attn_index, lengths_img)
     logging.info("Text to image: %.1f, %.1f, %.1f" %
@@ -243,5 +243,5 @@ def accuracy(output, target, topk=(1,)):
 
 
 if __name__ == '__main__':
-    os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
     main()
