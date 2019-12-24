@@ -4,4 +4,4 @@ import evaluation_charades as evaluation
 DATA_PATH = '/home/share/wangyunxiao/Charades'
 RUN_PATH = '/home/wangyunxiao/weak_supervised_video_moment/'
 
-evaluation.evalrank(RUN_PATH+"test_charades/context/model_best.pth.tar", data_path=DATA_PATH, split="test")
+evaluation.evalrank(RUN_PATH+"test_charades/mil/model_best.pth.tar", data_path=DATA_PATH, split="test")

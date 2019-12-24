@@ -61,12 +61,12 @@ class EncoderImagePrecomp(nn.Module):
         self.no_imgnorm = no_imgnorm
         self.use_abs = use_abs
 			
-        self.ws1 = nn.Linear(img_dim*4, embed_size)
+        self.ws1 = nn.Linear(img_dim, embed_size)
         self.softmax = nn.Softmax(dim=2)
         self.fc = nn.Linear(embed_size, embed_size)	
 
         self.init_weights()
-        self.positional_encoding = PositionalEncoding(d_model = 4096,dropout=0,max_len=100)
+        #self.positional_encoding = PositionalEncoding(d_model = 4096,dropout=0,max_len=100)
 
         # 修改
         #self.trans = nn.TransformerEncoderLayer(d_model=img_dim, nhead=1,dim_feedforward=4096)
@@ -299,7 +299,7 @@ class ContrastiveLoss(nn.Module):
         for i in range(size[0]):
             cost_sparse[i,:lengths_img[i]] = attn_weights[i,i,:lengths_img[i]]
         '''
-        return cost_s.sum() + cost_im.sum() #+ lambda_1*cost_smooth.pow(2).sum() + lambda_2*cost_sparse.abs().sum()
+        return cost_im.sum()+cost_s.sum() #+  #+ lambda_1*cost_smooth.pow(2).sum() + lambda_2*cost_sparse.abs().sum()
 
 class VSE(object):
     """

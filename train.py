@@ -8,7 +8,7 @@ import pandas
 import data_charades as data
 from vocab import Vocabulary
 from model_charades import VSE
-from evaluation_charades import t2i, AverageMeter, LogCollector, encode_data
+from evaluation_charades import t2i, AverageMeter, LogCollector, encode_data, evalrank
 
 import logging
 from torch.utils.tensorboard import SummaryWriter
@@ -24,11 +24,13 @@ def main():
                         help='path to datasets')
     parser.add_argument('--data_name', default='charades_precomp',
                         help='charades_precomp')
+    parser.add_argument('--name', default='default',
+                        help='model name')
     parser.add_argument('--vocab_path', default='./vocab/',
                         help='Path to saved vocabulary pickle files.')
     parser.add_argument('--margin', default=0.1, type=float,
                         help='Rank loss margin.') # 0.1 for Charades-STA and 0.2 for DiDeMo
-    parser.add_argument('--num_epochs', default=120, type=int,
+    parser.add_argument('--num_epochs', default=80, type=int,
                         help='Number of training epochs.')
     parser.add_argument('--batch_size', default=128, type=int,
                         help='Size of a training mini-batch.') # 论文中为128
@@ -44,7 +46,7 @@ def main():
                         help='Number of GRU layers.')
     parser.add_argument('--learning_rate', default=.001, type=float,
                         help='Initial learning rate.') # 论文中设为0.001
-    parser.add_argument('--lr_update', default=60, type=int,
+    parser.add_argument('--lr_update', default=40, type=int,
                         help='Number of epochs to update the learning rate.') # 论文中为15
     parser.add_argument('--workers', default=10, type=int,
                         help='Number of data loader workers.')
@@ -243,5 +245,13 @@ def accuracy(output, target, topk=(1,)):
 
 
 if __name__ == '__main__':
-    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+    #os.environ["CUDA_VISIBLE_DEVICES"] = "1"
     main()
+    path = os.path.join('test_charades','cost_im')
+    if not os.path.exists(path):
+        os.mkdir(path)
+    os.system("mv runs/runX/* "+path)
+    DATA_PATH = '/home/share/wangyunxiao/Charades'
+    RUN_PATH = '/home/wangyunxiao/weak_supervised_video_moment/'
+    evalrank(os.path.join(RUN_PATH,path,'model_best.pth.tar'), data_path=DATA_PATH, split="test")
+

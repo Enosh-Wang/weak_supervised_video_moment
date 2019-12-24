@@ -206,20 +206,15 @@ def encode_data(model, data_loader,tb_writer,df, is_training=True, log_step=10, 
                 for i in range(len_img):
                     if i == score_argmax:
                         continue
-                    else:
-                        if score[i] == score_max:
-                            local_max_cnt += 1
-                    '''
                     elif i == 0 :
-                        if score[0] > score[1] and score[0] > score_max-0.05:
+                        if score[0] > score[1] and score[0] > score_max-0.01:
                             local_max_cnt += 1
-                    elif i == break_128-1:
-                        if score[break_128-1] > score[break_128-2] and score[break_128-1] > score_max-0.05:
+                    elif i == len_img-1:
+                        if score[len_img-1] > score[len_img-2] and score[len_img-1] > score_max-0.01:
                             local_max_cnt += 1
                     else:
-                        if score[i] > score[i-1] and score[i] > score[i+1] and score[i] > score_max-0.05:
+                        if score[i] > score[i-1] and score[i] > score[i+1] and score[i] > score_max-0.01:
                             local_max_cnt += 1
-                    '''
                 if local_max_cnt > 0:
                     local_max += 1
 

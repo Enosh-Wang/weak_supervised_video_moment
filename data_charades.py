@@ -70,14 +70,14 @@ class Charades(data.Dataset):
         video_feat2_right[range(feat2_length-1)] = video_feat2[range(1,feat2_length)]
         video_feat2_global = np.repeat(video_feat_global,feat2_length,axis=0)
 
-        video_feat1_context = np.concatenate((video_feat1_left,video_feat1,video_feat1_right,video_feat1_global),axis=1)
-        video_feat2_context = np.concatenate((video_feat2_left,video_feat2,video_feat2_right,video_feat2_global),axis=1)
+        video_feat1_context = np.concatenate((video_feat1_left,video_feat1,video_feat1_right),axis=1)
+        video_feat2_context = np.concatenate((video_feat2_left,video_feat2,video_feat2_right),axis=1)
         # concatenation of all 128 frame feature and 256 frame feature
         # 拼接多尺滑窗 shape = (6,4096)
         
-        video_feat=np.concatenate((video_feat1_context,video_feat2_context),axis=0)
+        #video_feat=np.concatenate((video_feat1_context,video_feat2_context),axis=0)
         
-        #video_feat=np.concatenate((video_feat1,video_feat2),axis=0)
+        video_feat=np.concatenate((video_feat1,video_feat2),axis=0)
 
 
         # 数组转成tensor
@@ -122,7 +122,7 @@ def collate_fn(data):
     # lengths_img是滑动窗口提取的特征数目
     lengths_img = [len(im) for im in images]
     # 貌似就进行了一个zero padding，补足滑窗的数目，每个滑窗的特征是4096维
-    target_images = torch.zeros(len(images), max(lengths_img), 4096*4) 
+    target_images = torch.zeros(len(images), max(lengths_img), 4096) 
     for i, im in enumerate(images):
         end = lengths_img[i]
         target_images[i, :end,] = im[:end,]
