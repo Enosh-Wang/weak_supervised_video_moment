@@ -22,6 +22,12 @@ num03 = 0
 num05 = 0
 num07 = 0
 
+R5IOU5=0
+R5IOU7=0
+R5IOU3=0
+R10IOU3=0
+R10IOU5=0
+R10IOU7=0
 for i in range(length):
     gt_start = start_segment[i]
     gt_end = end_segment[i]
@@ -63,3 +69,103 @@ for i in range(length):
 print(float(num03)/length)
 print(float(num05)/length)
 print(float(num07)/length)
+for j1 in range(5):
+            if (att_inds[j1]<break_128):
+               rank1_start_seg =att_inds[j1]*128
+               rank1_end_seg = rank1_start_seg+128
+            else:
+               rank1_start_seg =(att_inds[j1]-break_128)*256
+               rank1_end_seg = rank1_start_seg+256
+			   
+            iou = cIoU((gt_start, gt_end),(rank1_start_seg, rank1_end_seg))
+            if iou>=0.5:
+               R5IOU5+=1
+               break
+			   
+        for j1 in range(5):
+            if (att_inds[j1]<break_128):
+               rank1_start_seg =att_inds[j1]*128
+               rank1_end_seg = rank1_start_seg+128
+            else:
+               rank1_start_seg =(att_inds[j1]-break_128)*256
+               rank1_end_seg = rank1_start_seg+256
+			   
+            iou = cIoU((gt_start, gt_end),(rank1_start_seg, rank1_end_seg))
+            if iou>=0.7:
+               R5IOU7+=1
+               break
+			   
+        for j1 in range(5):
+            if (att_inds[j1]<break_128):
+               rank1_start_seg =att_inds[j1]*128
+               rank1_end_seg = rank1_start_seg+128
+            else:
+               rank1_start_seg =(att_inds[j1]-break_128)*256
+               rank1_end_seg = rank1_start_seg+256
+			   
+            iou = cIoU((gt_start, gt_end),(rank1_start_seg, rank1_end_seg))
+            if iou>=0.3:
+               R5IOU3+=1
+               break
+			   
+        for j1 in range(10):
+            if (att_inds[j1]<break_128):
+               rank1_start_seg =att_inds[j1]*128
+               rank1_end_seg = rank1_start_seg+128
+            else:
+               rank1_start_seg =(att_inds[j1]-break_128)*256
+               rank1_end_seg = rank1_start_seg+256
+			   
+            iou = cIoU((gt_start, gt_end),(rank1_start_seg, rank1_end_seg))
+            if iou>=0.5:
+               R10IOU5+=1
+               break
+			   
+        for j1 in range(10):
+            if (att_inds[j1]<break_128):
+               rank1_start_seg =att_inds[j1]*128
+               rank1_end_seg = rank1_start_seg+128
+            else:
+               rank1_start_seg =(att_inds[j1]-break_128)*256
+               rank1_end_seg = rank1_start_seg+256
+			   
+            iou = cIoU((gt_start, gt_end),(rank1_start_seg, rank1_end_seg))
+            if iou>=0.7:
+               R10IOU7+=1
+               break
+			   
+        for j1 in range(10):
+            if (att_inds[j1]<break_128):
+               rank1_start_seg =att_inds[j1]*128
+               rank1_end_seg = rank1_start_seg+128
+            else:
+               rank1_start_seg =(att_inds[j1]-break_128)*256
+               rank1_end_seg = rank1_start_seg+256
+			   
+            iou = cIoU((gt_start, gt_end),(rank1_start_seg, rank1_end_seg))
+            if iou>=0.3:
+               R10IOU3+=1
+               break    
+			    	
+			   
+	
+	
+	############################
+
+    # Compute metrics
+    R1IoU05=correct_num05
+    R1IoU07=correct_num07
+    R1IoU03=correct_num03
+    total_length=attn_index.shape[0]
+    #print('total length',total_length)
+    print("R@1 IoU0.3: %f" %(R1IoU03/float(total_length)))
+    print("R@5 IoU0.3: %f" %(R5IOU3/float(total_length)))
+    print("R@10 IoU0.3: %f" %(R10IOU3/float(total_length)))
+	
+    print("R@1 IoU0.5: %f" %(R1IoU05/float(total_length)))
+    print("R@5 IoU0.5: %f" %(R5IOU5/float(total_length)))
+    print("R@10 IoU0.5: %f" %(R10IOU5/float(total_length)))
+	
+    print("R@1 IoU0.7: %f" %(R1IoU07/float(total_length)))
+    print("R@5 IoU0.7: %f" %(R5IOU7/float(total_length)))
+    print("R@10 IoU0.7: %f" %(R10IOU7/float(total_length)))

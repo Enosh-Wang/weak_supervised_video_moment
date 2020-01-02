@@ -1,8 +1,6 @@
 nohup.out
 test.py
-test_charades/*
+lianxi.py
 __pycache__/
-runs/*
-vocab/*
 .vscode/
-img/*
+PE.png
