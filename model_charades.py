@@ -104,26 +104,18 @@ class EncoderImagePrecomp(nn.Module):
 
         #images = self.positional_encoding(images)
         image_feature=self.ws1(images) # weight [4096, 1024] feature [128, 14, 1024]
-        #size = image_feature.size()
         attn_weights=cross_attention(image_feature, cap_embs, dim=2)
-        #attn_weights = self.softmax(attn_weights)
         size = attn_weights.size()
         mask=torch.zeros(size).cuda()
         # 原版attn_weights[128,14,1] 在clip维度上执行softmax
         
         for i in range(size[0]):
             for j in range(size[1]):
-                #temp=self.softmax(attn_weights[i,j,0:lengths_img[i]])
                 mask[i,j,lengths_img[i]:] = float('-inf')
         # 下面部分代码的作用实现 Text-guided attention，可以结合论文来看
-        # attn_weights_s.requires_grad_()
-        # attn_weights=attn_weights_s.cuda()
         attn_weights_mask = attn_weights + mask
         attn_weights_soft = self.softmax(attn_weights_mask)
         # img_feature=[128,26,1024] attn_weight=[128,26,1]
-        
-        # 原版代码
-        # out=torch.bmm(image_feature.transpose(1,2),attn_weights)
 
         # <!-改用max的代码
         #max_index = attn_weights.argmax(dim=1)
@@ -132,10 +124,6 @@ class EncoderImagePrecomp(nn.Module):
         #for i in range(size[0]):
         #    out[i] = image_feature[i,max_index[i],:]
         # 改用max的代码-!>
-
-        # <!- 改用MIL的代码
-        scores = torch.max(attn_weights_soft,2)[0]
-        # 改用MIL的代码 -!>
         '''
         # out [128,1024]
         features = self.fc(out)
@@ -150,7 +138,7 @@ class EncoderImagePrecomp(nn.Module):
 
         return features, attn_weights
         '''
-        return scores,attn_weights_soft
+        return attn_weights_soft
 
     def load_state_dict(self, state_dict):
         """Copies parameters. overwritting the default one to
@@ -251,9 +239,10 @@ class ContrastiveLoss(nn.Module):
 
         self.max_violation = max_violation
 
-    def forward(self,scores,attn_weights,lengths_img):
+    def forward(self,attn_weights,lengths_img):
         # 取对角线元素 2D -> 1D
         # view的作用类似reshape
+        scores = torch.max(attn_weights,2)[0]
         diagonal = scores.diag().view(scores.size(0), 1)
         # 扩展成与scores相同的大小
         d1 = diagonal.expand_as(scores)
@@ -282,6 +271,28 @@ class ContrastiveLoss(nn.Module):
         if self.max_violation:
             cost_s = cost_s.max(1)[0]
             cost_im = cost_im.max(0)[0]
+        
+        
+        size = attn_weights.size()
+        cost_p = torch.zeros((size[0],size[2]))
+        cost_n = torch.zeros((size[0],size[0]))
+        for i in range(size[0]):
+            
+            positive_bag = attn_weights[i,i,:]
+            tp_tensor,tp_arg = torch.max(positive_bag,dim=0,keepdim=True)
+            tp1 = tp_tensor.expand_as(attn_weights[i,i,:])
+            cost_p[i] = (self.margin + positive_bag - tp1).clamp(min=0)
+            cost_p[i,tp_arg] = 0
+
+            negative_bag = attn_weights[:,i,tp_arg]
+            negative_bag = torch.squeeze(negative_bag)
+            tp2 = tp_tensor.expand_as(negative_bag)
+            cost_n[i] = (self.margin + negative_bag - tp2).clamp(min=0)
+            cost_n[i,i] = 0
+            
+        cost_p = cost_p.max(1)[0]
+        cost_n = cost_n.max(0)[0]
+
         '''
         # 时间平滑项
         lambda_1 = 8e-5
@@ -299,7 +310,7 @@ class ContrastiveLoss(nn.Module):
         for i in range(size[0]):
             cost_sparse[i,:lengths_img[i]] = attn_weights[i,i,:lengths_img[i]]
         '''
-        return cost_im.sum()+cost_s.sum() #+  #+ lambda_1*cost_smooth.pow(2).sum() + lambda_2*cost_sparse.abs().sum()
+        return cost_p.sum()+cost_n.sum()#+cost_n.sum()#cost_im.sum()+cost_s.sum() #+  #+ lambda_1*cost_smooth.pow(2).sum() + lambda_2*cost_sparse.abs().sum()
 
 class VSE(object):
     """
@@ -366,8 +377,6 @@ class VSE(object):
         """
         # Set mini-batch dataset
         # 封装数据类型
-        #images = Variable(images)
-        #captions = Variable(captions)
         if torch.cuda.is_available():
             images = images.cuda()
             captions = captions.cuda()
@@ -379,10 +388,10 @@ class VSE(object):
         # 实验：加入self-attention
         #img_emb, attn_weights = self.img_enc(images,cap_init_emb,lengths_img)
         # [128,128]
-        scores, attn_weights = self.img_enc(images,cap_init_emb,lengths_img)
+        attn_weights = self.img_enc(images,cap_init_emb,lengths_img)
         #cap_emb=cap_init_emb
         #return img_emb, cap_emb, attn_weights
-        return  attn_weights, scores
+        return  attn_weights
 
     # 删除了volatile
     def forward_emb_image(self, images):
@@ -418,11 +427,11 @@ class VSE(object):
         self.logger.update('Le', loss.data, img_emb.size(0))
         return loss
     '''
-    def forward_loss(self, scores,attn_weights,lengths_img, **kwargs):
+    def forward_loss(self, attn_weights, lengths_img, **kwargs):
         """Compute the loss given pairs of image and caption embeddings
         """
-        loss = self.criterion(scores,attn_weights,lengths_img)
-        self.logger.update('loss', loss.data, scores.size(0))
+        loss = self.criterion(attn_weights,lengths_img)
+        self.logger.update('loss', loss.data, attn_weights.size(0))
         return loss
     def train_emb(self, images, captions, lengths, lengths_img, ids=None, *args):
         """One training step given images and captions.
@@ -434,11 +443,11 @@ class VSE(object):
 
         # compute the embeddings
         #img_emb, cap_emb, attn_weights = self.forward_emb(images, captions, lengths, lengths_img)
-        attn_weights,scores = self.forward_emb(images, captions, lengths, lengths_img)
+        attn_weights = self.forward_emb(images, captions, lengths, lengths_img)
         # measure accuracy and record loss
         self.optimizer.zero_grad()
         #loss = self.forward_loss(img_emb, cap_emb)
-        loss = self.forward_loss(scores,attn_weights,lengths_img)
+        loss = self.forward_loss(attn_weights,lengths_img)
         # compute gradient and do SGD step
         loss.backward()
         if self.grad_clip > 0:

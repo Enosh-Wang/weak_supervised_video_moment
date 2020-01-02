@@ -247,7 +247,7 @@ def accuracy(output, target, topk=(1,)):
 if __name__ == '__main__':
     #os.environ["CUDA_VISIBLE_DEVICES"] = "1"
     main()
-    path = os.path.join('test_charades','cost_im')
+    path = os.path.join('test_charades','cost_p_max+cost_n_max')
     if not os.path.exists(path):
         os.mkdir(path)
     os.system("mv runs/runX/* "+path)

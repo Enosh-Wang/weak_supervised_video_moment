@@ -109,7 +109,7 @@ def encode_data(model, data_loader,tb_writer,df, is_training=True, log_step=10, 
 
         # compute the embeddings
         with torch.no_grad(): # 替代volatile=True，已弃用
-            attn_weights, scores = model.forward_emb(images, captions, lengths, lengths_img)
+            attn_weights = model.forward_emb(images, captions, lengths, lengths_img)
 		
         # 提取对角线元素
         size = attn_weights.size()
@@ -142,7 +142,7 @@ def encode_data(model, data_loader,tb_writer,df, is_training=True, log_step=10, 
         rank1_ind[ids] = rank_att1
 
         # measure accuracy and record loss
-        model.forward_loss(scores,attn_weights,lengths_img)
+        model.forward_loss(attn_weights,lengths_img)
 
         # measure elapsed time
         batch_time.update(time.time() - end)
