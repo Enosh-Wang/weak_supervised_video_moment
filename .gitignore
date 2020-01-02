@@ -1,8 +1,8 @@
 nohup.out
 test.py
-test_charades/
+test_charades/*
 __pycache__/
-runs/
-vocab/
+runs/*
+vocab/*
 .vscode/
 img/*
