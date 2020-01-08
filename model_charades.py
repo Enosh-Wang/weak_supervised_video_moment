@@ -8,6 +8,9 @@ from torch.nn.utils.clip_grad import clip_grad_norm
 import numpy as np
 from collections import OrderedDict
 import math
+import matplotlib
+matplotlib.use('agg')
+import matplotlib.pyplot as plt
 
 def l2norm(X):
     """L2-normalize columns of X
@@ -61,7 +64,8 @@ class EncoderImagePrecomp(nn.Module):
         self.no_imgnorm = no_imgnorm
         self.use_abs = use_abs
 			
-        self.ws1 = nn.Linear(img_dim, embed_size)
+        self.ws1 = nn.Linear(img_dim*3, embed_size*2)
+        self.ws2 = nn.Linear(embed_size*2, embed_size)
         self.softmax = nn.Softmax(dim=2)
         self.fc = nn.Linear(embed_size, embed_size)	
 
@@ -104,6 +108,7 @@ class EncoderImagePrecomp(nn.Module):
 
         #images = self.positional_encoding(images)
         image_feature=self.ws1(images) # weight [4096, 1024] feature [128, 14, 1024]
+        image_feature = self.ws2(image_feature)
         attn_weights=cross_attention(image_feature, cap_embs, dim=2)
         size = attn_weights.size()
         mask=torch.zeros(size).cuda()
@@ -138,7 +143,7 @@ class EncoderImagePrecomp(nn.Module):
 
         return features, attn_weights
         '''
-        return attn_weights_soft
+        return image_feature,attn_weights_soft
 
     def load_state_dict(self, state_dict):
         """Copies parameters. overwritting the default one to
@@ -162,30 +167,30 @@ class EncoderText(nn.Module):
                  use_abs=False):
         super(EncoderText, self).__init__()
         self.use_abs = use_abs
-        self.embed_size = embed_size
+        self.embed_size = embed_size # default=1024 
 
         # word embedding
         # 转为词向量
         self.embed = nn.Embedding(vocab_size, word_dim)
 
         # 加上transformer，尝试通过self-attention区分不同单词的影响程度（不同词性的重要性不同）
-        #self.trans = nn.TransformerEncoderLayer(d_model = word_dim,nhead = 1) # nhead要能整除word_dim
+        self.trans = nn.TransformerEncoderLayer(d_model = word_dim,nhead = 1) # nhead要能整除word_dim
         # caption embedding
-        self.rnn = nn.GRU(word_dim, embed_size, num_layers, batch_first=True)
+        self.rnn = nn.GRU(word_dim, embed_size//2, num_layers, batch_first=True,bidirectional=True)
 
         self.init_weights()
 
     def init_weights(self):
         self.embed.weight.data.uniform_(-0.1, 0.1)
 
-    def forward(self, x, lengths):
+    def forward(self, x, lengths, is_training):
         """Handles variable size captions
         """
         # Embed word ids to vectors
 
         x = self.embed(x)
         # 修改
-        #x = self.trans(x)
+        x = self.trans(x)
         packed = pack_padded_sequence(x, lengths, batch_first=True)
 
         # Forward propagate RNN
@@ -290,8 +295,8 @@ class ContrastiveLoss(nn.Module):
             cost_n[i] = (self.margin + negative_bag - tp2).clamp(min=0)
             cost_n[i,i] = 0
             
-        cost_p = cost_p.max(1)[0]
-        cost_n = cost_n.max(0)[0]
+        #cost_p = cost_p.max(1)[0]
+        #cost_n = cost_n.max(1)[0]
 
         '''
         # 时间平滑项
@@ -371,7 +376,7 @@ class VSE(object):
         self.txt_enc.eval()
 
     # 删除了volatile
-    def forward_emb(self, images, captions, lengths, lengths_img):
+    def forward_emb(self, images, captions, lengths, lengths_img, is_training):
         """Compute the image and caption embeddings
         输入依次是一个batch的padding后的视频、padding后的文本，文本的单词数目，视频的滑窗数目
         """
@@ -383,15 +388,15 @@ class VSE(object):
 
         # Forward
         # 主要进行Embedding和GRU
-        cap_init_emb = self.txt_enc(captions, lengths)
+        cap_init_emb = self.txt_enc(captions, lengths, is_training)
         # 主要有两个FC和一个Text-Guide Attention
         # 实验：加入self-attention
         #img_emb, attn_weights = self.img_enc(images,cap_init_emb,lengths_img)
         # [128,128]
-        attn_weights = self.img_enc(images,cap_init_emb,lengths_img)
+        img_emb,attn_weights = self.img_enc(images,cap_init_emb,lengths_img)
         #cap_emb=cap_init_emb
         #return img_emb, cap_emb, attn_weights
-        return  attn_weights
+        return  img_emb,cap_init_emb,attn_weights
 
     # 删除了volatile
     def forward_emb_image(self, images):
@@ -443,7 +448,7 @@ class VSE(object):
 
         # compute the embeddings
         #img_emb, cap_emb, attn_weights = self.forward_emb(images, captions, lengths, lengths_img)
-        attn_weights = self.forward_emb(images, captions, lengths, lengths_img)
+        img_emb, cap_emb, attn_weights = self.forward_emb(images, captions, lengths, lengths_img, is_training = True)
         # measure accuracy and record loss
         self.optimizer.zero_grad()
         #loss = self.forward_loss(img_emb, cap_emb)

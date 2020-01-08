@@ -30,7 +30,7 @@ def main():
                         help='Path to saved vocabulary pickle files.')
     parser.add_argument('--margin', default=0.1, type=float,
                         help='Rank loss margin.') # 0.1 for Charades-STA and 0.2 for DiDeMo
-    parser.add_argument('--num_epochs', default=80, type=int,
+    parser.add_argument('--num_epochs', default=40, type=int,
                         help='Number of training epochs.')
     parser.add_argument('--batch_size', default=128, type=int,
                         help='Size of a training mini-batch.') # 论文中为128
@@ -247,11 +247,10 @@ def accuracy(output, target, topk=(1,)):
 if __name__ == '__main__':
     #os.environ["CUDA_VISIBLE_DEVICES"] = "1"
     main()
-    path = os.path.join('test_charades','cost_p_max+cost_n_max')
+    path = os.path.join('test_charades','biGRU+trans')
     if not os.path.exists(path):
         os.mkdir(path)
     os.system("mv runs/runX/* "+path)
     DATA_PATH = '/home/share/wangyunxiao/Charades'
-    RUN_PATH = '/home/wangyunxiao/weak_supervised_video_moment/'
-    evalrank(os.path.join(RUN_PATH,path,'model_best.pth.tar'), data_path=DATA_PATH, split="test")
+    evalrank(os.path.join(path,'model_best.pth.tar'), data_path=DATA_PATH, split="test")
 

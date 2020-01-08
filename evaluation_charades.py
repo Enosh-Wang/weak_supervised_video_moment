@@ -11,10 +11,8 @@ import torch
 from model_charades import VSE
 from collections import OrderedDict
 import pandas
-import matplotlib
-matplotlib.use('agg')
-import matplotlib.pyplot as plt
 from torch.utils.tensorboard import SummaryWriter
+from plot_util import plot_pca,plot_similarity,plot_sentence,plot_video
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
@@ -88,20 +86,14 @@ def encode_data(model, data_loader,tb_writer,df, is_training=True, log_step=10, 
     model.val_start()
 
     end = time.time()
-
-    attention_index = np.zeros((len(data_loader.dataset), 10))
-    rank1_ind = np.zeros((len(data_loader.dataset)))
+    # 数组，用于保存所有epoch的数据
+    attention_index_all = np.zeros((len(data_loader.dataset), 10))
+    rank1_index_all = np.zeros((len(data_loader.dataset)))
     lengths_all = np.zeros((len(data_loader.dataset)))
-
-    pre_128 = 0
-    pre_256 = 0
-    gt_128 = 0
-    gt_256 = 0
-    too_small = 0
-    too_large = 0
-    local_max = 0
-    small_std = 0
-    too_small_iou = 0
+    img_embs_all = np.zeros((len(data_loader.dataset), 1024))
+    cap_embs_all = np.zeros((len(data_loader.dataset), 1024))
+    attention_weight_all = np.zeros((len(data_loader.dataset),100)) # 统计最大21
+    
 
     for epoch, (images, captions, lengths, lengths_img, ids) in enumerate(data_loader):
         # make sure val logger is used
@@ -109,40 +101,46 @@ def encode_data(model, data_loader,tb_writer,df, is_training=True, log_step=10, 
 
         # compute the embeddings
         with torch.no_grad(): # 替代volatile=True，已弃用
-            attn_weights = model.forward_emb(images, captions, lengths, lengths_img)
-		
+            img_emb, cap_emb, attenton_weight = model.forward_emb(images, captions, lengths, lengths_img, is_training)
         # 提取对角线元素
-        size = attn_weights.size()
-        attn_weights_diag = torch.zeros(size[0],size[2])
+        size = attenton_weight.size()
+        attenton_weight_diag = torch.zeros(size[0],size[2])
         for i in range(size[0]):
-            attn_weights_diag[i,:] = attn_weights[i,i,:]
-        # padding
-        if(attn_weights_diag.size(1)<10):
-            attn_weight=torch.zeros(attn_weights_diag.size(0),10)
-            attn_weight[:,0:attn_weights_diag.size(1)]=attn_weights_diag
-        else:
-            attn_weight=attn_weights_diag
+            attenton_weight_diag[i,:] = attenton_weight[i,i,:]
 
-        batch_length=attn_weight.size(0)
-        attn_weight=torch.squeeze(attn_weight)
+        # padding 滑窗个数不足十个padding到十个 为了方便合成一个数组进行可视化，改成25了
+        if(attenton_weight_diag.size(1)<100):
+            attenton_weight_positive=torch.zeros(attenton_weight_diag.size(0),100)
+            attenton_weight_positive[:,0:attenton_weight_diag.size(1)]=attenton_weight_diag
+        else:
+            attenton_weight_positive=attenton_weight_diag
+
+        batch_length=attenton_weight_positive.size(0)
+        attenton_weight_positive=torch.squeeze(attenton_weight_positive)
         
-        # 保留每个batch中每个样本的前十个结果
+        # 保留每个batch中每个样本的前十个结果的序号
         attn_index= np.zeros((batch_length, 10)) # Rank 1 to 10
         rank_att1= np.zeros(batch_length)
-        temp=attn_weight.data.cpu().numpy().copy()
+        img_emb_batch = img_emb.data.cpu().numpy().copy()
+        img_emb_temp = np.zeros((batch_length,1024))
+        temp=attenton_weight_positive.data.cpu().numpy().copy()
         for k in range(batch_length):
             att_weight=temp[k,:]
             sc_ind=numpy.argsort(-att_weight)
             rank_att1[k]=sc_ind[0]
             attn_index[k,:]=sc_ind[0:10]
+            img_emb_temp[k,:]=img_emb_batch[k,sc_ind[0],:]
 	
         # preserve the embeddings by copying from gpu and converting to numpy
-        attention_index[ids] = attn_index
+        attention_index_all[ids] = attn_index
         lengths_all[ids] = lengths_img
-        rank1_ind[ids] = rank_att1
+        rank1_index_all[ids] = rank_att1
+        img_embs_all[ids] = img_emb_temp
+        cap_embs_all[ids] = cap_emb.data.cpu().numpy().copy()
+        attention_weight_all[ids] = temp
 
         # measure accuracy and record loss
-        model.forward_loss(attn_weights,lengths_img)
+        model.forward_loss(attenton_weight,lengths_img)
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -156,140 +154,12 @@ def encode_data(model, data_loader,tb_writer,df, is_training=True, log_step=10, 
                         epoch, len(data_loader), batch_time=batch_time,
                         e_log=str(model.logger)))
         del images, captions
-        if is_training == False:
-            # 绘图
-            path = os.path.join('img',str(epoch))
-            if not os.path.exists(path):
-                os.makedirs(path)
-            
-            # 读取GT
-            start_segment=df['start_segment']
-            end_segment=df['end_segment']
-            attn_max = torch.max(attn_weight).data
-            attn_weight = attn_weight.data.cpu().numpy().copy()
-            for index in range(batch_length):
-
-                # 视频的长度
-                len_img=lengths_img[index]
-
-                break_128=int(np.floor(len_img*2/3))
-
-                gt_start = start_segment[ids[index]]
-                gt_end = end_segment[ids[index]]
-
-                # 计算GT和所有滑窗的iou
-                start_128 = range(break_128)
-                end_128 = range(1,int(break_128+1))
-                start_256 = range(int(len_img-break_128))
-                end_256 = range(1,int(len_img-break_128+1))
-                iou_list=[]
-                for start,end in zip(start_128,end_128):
-                    iou = cIoU((gt_start,gt_end),(start*128,end*128))
-                    iou_list.append(iou)
-                for start,end in zip(start_256,end_256):
-                    iou = cIoU((gt_start,gt_end),(start*256,end*256))
-                    iou_list.append(iou)
-                iou_array = np.array(iou_list)
-                iou_max = np.argmax(iou_array)
-
-                # 统计128窗口的得分分布情况
-                # 标准差
-                score = attn_weight[index,:len_img]
-                score_std = np.std(score)
-                if score_std < 0.025 :
-                    small_std += 1
-
-                # 局部最大值
-                score_argmax = np.argmax(score)
-                score_max = np.max(score)
-                local_max_cnt = 0
-                for i in range(len_img):
-                    if i == score_argmax:
-                        continue
-                    elif i == 0 :
-                        if score[0] > score[1] and score[0] > score_max-0.01:
-                            local_max_cnt += 1
-                    elif i == len_img-1:
-                        if score[len_img-1] > score[len_img-2] and score[len_img-1] > score_max-0.01:
-                            local_max_cnt += 1
-                    else:
-                        if score[i] > score[i-1] and score[i] > score[i+1] and score[i] > score_max-0.01:
-                            local_max_cnt += 1
-                if local_max_cnt > 0:
-                    local_max += 1
-
-
-                # 起始帧
-                rank1_start=rank_att1[index]
-                if (rank1_start<break_128):
-                    # 128的滑窗
-                    pre_128 += 1
-                    rank1_start_seg =rank1_start*128
-                    rank1_end_seg = rank1_start_seg+128
-                else:
-                    # 256的滑窗
-                    pre_256 += 1
-                    rank1_start_seg =(rank1_start-break_128)*256
-                    rank1_end_seg = rank1_start_seg+256
-
-                gt_start_128 = gt_start/128.0
-                gt_end_128 = gt_end/128.0
-                gt_start_256 = gt_start/256.0 + break_128
-                gt_end_256 = gt_end/256.0 + break_128
-                if iou_max < break_128 :
-                    gt_128 += 1
-                    is_gt_128 = True
-                else:
-                    gt_256 += 1
-                    is_gt_128 = False
-                
-                iou = cIoU((gt_start,gt_end),(rank1_start_seg,rank1_end_seg))
-                if iou_max < break_128:
-                    if rank1_start >= break_128:
-                        too_large += 1
-                else:
-                    if rank1_start < break_128:
-                        too_small += 1
-                        if iou > 0:
-                            too_small_iou +=1
-
-                f = plt.figure(figsize=(6,4))
-                # 绘制分界线
-                plt.plot([break_128,break_128],[0,attn_max],linestyle=":",color='gray')
-                plt.plot([len_img,len_img],[0,attn_max],linestyle=":",color='gray')
-                # 绘制预测区域
-                plt.plot([rank1_start,rank1_start+1],[attn_max*0.6,attn_max*0.6],linewidth=4,color='darkred')
-                # 绘制GT区域
-                if is_gt_128:
-                    plt.plot([gt_start_128,gt_end_128],[attn_max*0.4,attn_max*0.4],linewidth=4,color='orange',marker='o')
-                    plt.plot([gt_start_256,gt_end_256],[attn_max*0.4,attn_max*0.4],linewidth=4,color='orange')
-                else:
-                    plt.plot([gt_start_128,gt_end_128],[attn_max*0.4,attn_max*0.4],linewidth=4,color='orange')
-                    plt.plot([gt_start_256,gt_end_256],[attn_max*0.4,attn_max*0.4],linewidth=4,color='orange',marker='o')
-                # 绘制得分曲线
-                '''
-                x_128 = range(break_128)
-                y_128 = score[x_128]
-                plt.plot(x_128,y_128,'g--',marker='o')
-
-                x_256 = range(break_128,len_img)
-                y_256 = score[x_256]
-                plt.plot(x_256,y_256,'g--',marker='o')
-                '''
-                x = range(len_img)
-                y = score[x]
-                plt.plot(x,y,'g--',marker='o')
-
-                
-                plt.xlabel('len: %d,  break_128: %d,  rank1: %d,  std: %0.3f,  local_max: %d'
-                            %(len_img,break_128,rank1_start,score_std,local_max_cnt))
-                plt.title('GT: %d-%d,  Pre: %d-%d,  IOU: %0.2f'%(gt_start,gt_end,rank1_start_seg,rank1_end_seg,iou))
-                plt.savefig(os.path.join(path,str(ids[index])+'.png'))
-                plt.close(f)
     if is_training == False:
-        print('pre_128: %d,  pre_256: %d,  gt_128: %d,  gt_256: %d,  too_small: %d,  too_large: %d,  small_std: %d,  local_max: %d,  too_small_iou: %d'
-            %(pre_128,pre_256,gt_128,gt_256,too_small,too_large,small_std,local_max,too_small_iou))
-    return  attention_index, lengths_all
+        plot_similarity(attention_weight_all,lengths_all,rank1_index_all,df)
+        plot_pca(img_embs_all,cap_embs_all,df)
+        plot_sentence(cap_embs_all,df)
+        plot_video(img_embs_all,lengths_all,df)
+    return  attention_index_all, lengths_all
 
 
 def evalrank(model_path, data_path=None, split='dev', fold5=False):
@@ -367,7 +237,7 @@ def t2i( df, attn_index, lengths_img, npts=None):
         gt_start=start_segment[index]
         gt_end=end_segment[index]
         # 因为将128和256的滑窗拼接在了一起，所以前2/3的特征是128滑窗的，后1/3的特征是256滑窗的
-        break_128=np.floor(len_img*2/3)-1
+        break_128=np.floor(len_img*2/3)
         # 起始帧
         rank1_start=att_inds[0]
         if (rank1_start<break_128):

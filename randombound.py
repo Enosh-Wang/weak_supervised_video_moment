@@ -28,6 +28,7 @@ R5IOU3=0
 R10IOU3=0
 R10IOU5=0
 R10IOU7=0
+length_max=0
 for i in range(length):
     gt_start = start_segment[i]
     gt_end = end_segment[i]
@@ -39,6 +40,8 @@ for i in range(length):
 
     range_128 = range(len(video_feat1))
     range_256 = range(len(video_feat2))
+    if len(video_feat1)+len(video_feat2) > length_max:
+        length_max = len(video_feat1)+len(video_feat2)
 
     iou_list = []
     for i in range_128:
@@ -65,10 +68,11 @@ for i in range(length):
         num05+=1
     if iou_max>=0.7:
         num07+=1
-
+print(length_max)
 print(float(num03)/length)
 print(float(num05)/length)
 print(float(num07)/length)
+'''
 for j1 in range(5):
             if (att_inds[j1]<break_128):
                rank1_start_seg =att_inds[j1]*128
@@ -169,3 +173,4 @@ for j1 in range(5):
     print("R@1 IoU0.7: %f" %(R1IoU07/float(total_length)))
     print("R@5 IoU0.7: %f" %(R5IOU7/float(total_length)))
     print("R@10 IoU0.7: %f" %(R10IOU7/float(total_length)))
+'''
