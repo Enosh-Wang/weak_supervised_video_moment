@@ -1,6 +1,5 @@
 nohup.out
 test.py
-lianxi.py
 __pycache__/
 .vscode/
-PE.png
+runs/*

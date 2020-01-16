@@ -1,18 +1,115 @@
-from __future__ import print_function
-import os
-import pickle
-
-import numpy
-from data_charades import get_test_loader
-import time
-import numpy as np
-from vocab import Vocabulary 
 import torch
-from model_charades import VSE
+import torch.nn as nn
+import torch.nn.init
+import torchvision.models as models
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+
+from torch.nn.utils.clip_grad import clip_grad_norm
+import numpy as np
 from collections import OrderedDict
-import pandas
-from torch.utils.tensorboard import SummaryWriter
-from plot_util import plot_pca,plot_similarity,plot_sentence,plot_video
+import math
+
+def l2norm(X):
+    """L2-normalize columns of X
+    """
+    norm = torch.pow(X, 2).sum(dim=1).sqrt()
+    X = X / norm[:,None]
+    return X
+
+
+def cosine_similarity(x1, x2):
+    """Returns cosine similarity based attention between x1 and x2, computed along dim."""
+    # 原始代码
+    # batch 矩阵相乘 x1[128,26,1024] x2[128,1024] w1[128,26,1]
+    # w1=torch.bmm(x1, x2.unsqueeze(2))
+    # <!-改为MIL
+    batch_size = x1.size()[0]
+    x2 = x2.repeat(batch_size,1,1) # [128,128,1024]
+    x1 = x1.permute(0,2,1) # [128,1024,14]
+    w1 = torch.bmm(x2,x1) # [128,128,14]
+    return w1
+'''
+class PositionalEncoding(nn.Module):
+    "Implement the PE function."
+
+    def __init__(self, d_model, dropout, max_len=100):
+        super(PositionalEncoding, self).__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        # Compute the positional encodings once in log space.
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0., max_len).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0., d_model, 2) *
+                             -(math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0) #[1,max_len,d_model]
+        
+        self.register_buffer('pe', pe)
+
+    def forward(self, x): # video : [batch_size,len,d_model]
+        #x = x + self.pe[:, :x.size(1)]
+        p = self.pe[:, :x.size(1)].repeat(x.size(0),1,1)
+        x = torch.cat((x,p),dim = 2)
+        return self.dropout(x)
+'''
+class PositionalEncoding(nn.Module):
+    """Inject some information about the relative or absolute position of the tokens
+        in the sequence. The positional encodings have the same dimension as
+        the embeddings, so that the two can be summed. Here, we use sine and cosine
+        functions of different frequencies.
+    math:
+        \text{PosEncoder}(pos, 2i) = sin(pos/10000^(2i/d_model))
+        \text{PosEncoder}(pos, 2i+1) = cos(pos/10000^(2i/d_model))
+        \text{where pos is the word position and i is the embed idx)
+    Args:
+        d_model: the embed dim (required).
+        dropout: the dropout value (default=0.1).
+        max_len: the max. length of the incoming sequence (default=5000).
+    Examples:
+        pos_encoder = PositionalEncoding(d_model)
+    """
+
+    def __init__(self, d_model, dropout=0.1, max_len=5000):
+        super(PositionalEncoding, self).__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0).transpose(0, 1)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        """Inputs of forward function
+        Args:
+            x: the sequence fed to the positional encoder model (required).
+        Shape:
+            x: [sequence length, batch size, embed dim]
+            output: [sequence length, batch size, embed dim]
+        Examples:
+            output = pos_encoder(x)
+        """
+
+        x = x + self.pe[:x.size(0), :]
+        return self.dropout(x)
+
+def cosine_sim(im, s):
+    """Cosine similarity between all the image and sentence pairs
+    """
+    # 标准的矩阵乘法 结果[滑窗个数，单词个数]
+    return im.mm(s.t())
+
+
+def order_sim(im, s):
+    """Order embeddings similarity measure $max(0, s-im)$
+    """
+    YmX = (s.unsqueeze(1).expand(s.size(0), im.size(0), s.size(1))
+           - im.unsqueeze(0).expand(s.size(0), im.size(0), s.size(1)))
+    score = -YmX.clamp(min=0).pow(2).sum(2).squeeze(2).sqrt().t()
+    return score
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
@@ -76,136 +173,10 @@ def cIoU(pred, gt):
     union = max(pred[1], gt[1]) + 1 - min(pred[0], gt[0])
     return float(intersection)/union
 
-def encode_data(model, data_loader,tb_writer,df, is_training=True, log_step=10, logging=print):
-    """Encode all images and captions loadable by `data_loader`
+def t2i( df, attn_index, video_length, npts=None):
     """
-    batch_time = AverageMeter()
-    val_logger = LogCollector()
-
-    # switch to evaluate mode
-    model.val_start()
-
-    end = time.time()
-    # 数组，用于保存所有epoch的数据
-    attention_index_all = np.zeros((len(data_loader.dataset), 10))
-    rank1_index_all = np.zeros((len(data_loader.dataset)))
-    lengths_all = np.zeros((len(data_loader.dataset)))
-    img_embs_all = np.zeros((len(data_loader.dataset), 1024))
-    cap_embs_all = np.zeros((len(data_loader.dataset), 1024))
-    attention_weight_all = np.zeros((len(data_loader.dataset),100)) # 统计最大21
-    
-
-    for epoch, (images, captions, lengths, lengths_img, ids) in enumerate(data_loader):
-        # make sure val logger is used
-        model.logger = val_logger
-
-        # compute the embeddings
-        with torch.no_grad(): # 替代volatile=True，已弃用
-            img_emb, cap_emb, attenton_weight = model.forward_emb(images, captions, lengths, lengths_img, is_training)
-        # 提取对角线元素
-        size = attenton_weight.size()
-        attenton_weight_diag = torch.zeros(size[0],size[2])
-        for i in range(size[0]):
-            attenton_weight_diag[i,:] = attenton_weight[i,i,:]
-
-        # padding 滑窗个数不足十个padding到十个 为了方便合成一个数组进行可视化，改成25了
-        if(attenton_weight_diag.size(1)<100):
-            attenton_weight_positive=torch.zeros(attenton_weight_diag.size(0),100)
-            attenton_weight_positive[:,0:attenton_weight_diag.size(1)]=attenton_weight_diag
-        else:
-            attenton_weight_positive=attenton_weight_diag
-
-        batch_length=attenton_weight_positive.size(0)
-        attenton_weight_positive=torch.squeeze(attenton_weight_positive)
-        
-        # 保留每个batch中每个样本的前十个结果的序号
-        attn_index= np.zeros((batch_length, 10)) # Rank 1 to 10
-        rank_att1= np.zeros(batch_length)
-        img_emb_batch = img_emb.data.cpu().numpy().copy()
-        img_emb_temp = np.zeros((batch_length,1024))
-        temp=attenton_weight_positive.data.cpu().numpy().copy()
-        for k in range(batch_length):
-            att_weight=temp[k,:]
-            sc_ind=numpy.argsort(-att_weight)
-            rank_att1[k]=sc_ind[0]
-            attn_index[k,:]=sc_ind[0:10]
-            img_emb_temp[k,:]=img_emb_batch[k,sc_ind[0],:]
-	
-        # preserve the embeddings by copying from gpu and converting to numpy
-        attention_index_all[ids] = attn_index
-        lengths_all[ids] = lengths_img
-        rank1_index_all[ids] = rank_att1
-        img_embs_all[ids] = img_emb_temp
-        cap_embs_all[ids] = cap_emb.data.cpu().numpy().copy()
-        attention_weight_all[ids] = temp
-
-        # measure accuracy and record loss
-        model.forward_loss(attenton_weight,lengths_img)
-
-        # measure elapsed time
-        batch_time.update(time.time() - end)
-        end = time.time()
-
-        if epoch % log_step == 0:
-            logging('Test: [{0}/{1}]\t'
-                    '{e_log}\t'
-                    'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                    .format(
-                        epoch, len(data_loader), batch_time=batch_time,
-                        e_log=str(model.logger)))
-        del images, captions
-    if is_training == False:
-        plot_similarity(attention_weight_all,lengths_all,rank1_index_all,df)
-        plot_pca(img_embs_all,cap_embs_all,df)
-        plot_sentence(cap_embs_all,df)
-        plot_video(img_embs_all,lengths_all,df)
-    return  attention_index_all, lengths_all
-
-
-def evalrank(model_path, data_path=None, split='dev', fold5=False):
-    """
-    Evaluate a trained model.
-    """
-    # load model and options
-    checkpoint = torch.load(model_path) # “model_best.pth.tar”
-    opt = checkpoint['opt'] 
-
-    tb_writer = SummaryWriter(opt.logger_name, flush_secs=5)
-
-    if data_path is not None:
-        opt.data_path = data_path
-    opt.vocab_path = "./vocab/"
-    # load vocabulary	   
-    vocab = pickle.load(open(os.path.join(
-        opt.vocab_path, 'vocab.pkl'), 'rb'))
-
-    opt.vocab_size = len(vocab)
-
-    # construct model
-    model = VSE(opt)
-    
-    # load model state
-    model.load_state_dict(checkpoint['model'])
-    print(opt)	
-	
-    ####### input video files
-    path= os.path.join(opt.data_path, opt.data_name)+"/Caption/charades_"+ str(split) + ".csv"
-    df=pandas.read_csv(open(path,'rb'))
-
-    print('Loading dataset')
-    data_loader = get_test_loader(split, opt.data_name, vocab, opt.crop_size,
-                                  opt.batch_size, opt.workers, opt)
-
-    print('Computing results...')
-    attn_index, lengths_img = encode_data(model, data_loader,tb_writer,df,is_training=False)
-
-	# retrieve moments
-    _, _, _ = t2i(df, attn_index, lengths_img)
-
-def t2i( df, attn_index, lengths_img, npts=None):
-    """
-    Text->Images (Image Search)
-    Images: (N, K) matrix of images
+    Text->videos (Image Search)
+    videos: (N, K) matrix of videos
     Captions: (N, K) matrix of captions
     """
     # 读取GT
@@ -232,7 +203,7 @@ def t2i( df, attn_index, lengths_img, npts=None):
         # 匹配结果的排序列表
         att_inds=attn_index[index,:]
         # 视频的长度
-        len_img=lengths_img[index]
+        len_img=video_length[index]
         # 读取GT
         gt_start=start_segment[index]
         gt_end=end_segment[index]
@@ -335,10 +306,7 @@ def t2i( df, attn_index, lengths_img, npts=None):
             if iou>=0.3:
                R10IOU3+=1
                break    
-			    	
-			   
-	
-	
+
 	############################
 
     # Compute metrics
@@ -361,5 +329,3 @@ def t2i( df, attn_index, lengths_img, npts=None):
 	
 	
     return R1IoU03, R1IoU05, R1IoU07
-		
-		
