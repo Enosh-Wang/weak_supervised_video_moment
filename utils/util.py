@@ -158,7 +158,7 @@ def cIoU(pred, gt):
     union = max(pred[1], gt[1]) + 1 - min(pred[0], gt[0])
     return float(intersection)/union
 
-def t2i( df, attn_index, video_length, npts=None):
+def t2i( df, attn_index, video_length, is_training, npts=None):
     """
     Text->videos (Image Search)
     videos: (N, K) matrix of videos
@@ -300,17 +300,18 @@ def t2i( df, attn_index, video_length, npts=None):
     R1IoU03=correct_num03
     total_length=attn_index.shape[0]
     #print('total length',total_length)
-    print("R@1 IoU0.3: %f" %(R1IoU03/float(total_length)))
-    print("R@5 IoU0.3: %f" %(R5IOU3/float(total_length)))
-    print("R@10 IoU0.3: %f" %(R10IOU3/float(total_length)))
-	
-    print("R@1 IoU0.5: %f" %(R1IoU05/float(total_length)))
-    print("R@5 IoU0.5: %f" %(R5IOU5/float(total_length)))
-    print("R@10 IoU0.5: %f" %(R10IOU5/float(total_length)))
-	
-    print("R@1 IoU0.7: %f" %(R1IoU07/float(total_length)))
-    print("R@5 IoU0.7: %f" %(R5IOU7/float(total_length)))
-    print("R@10 IoU0.7: %f" %(R10IOU7/float(total_length)))
+    if is_training == False:
+        print("R@1 IoU0.3: %f" %(R1IoU03/float(total_length)))
+        print("R@5 IoU0.3: %f" %(R5IOU3/float(total_length)))
+        print("R@10 IoU0.3: %f" %(R10IOU3/float(total_length)))
+        
+        print("R@1 IoU0.5: %f" %(R1IoU05/float(total_length)))
+        print("R@5 IoU0.5: %f" %(R5IOU5/float(total_length)))
+        print("R@10 IoU0.5: %f" %(R10IOU5/float(total_length)))
+        
+        print("R@1 IoU0.7: %f" %(R1IoU07/float(total_length)))
+        print("R@5 IoU0.7: %f" %(R5IOU7/float(total_length)))
+        print("R@10 IoU0.7: %f" %(R10IOU7/float(total_length)))
 	
 	
     return R1IoU03, R1IoU05, R1IoU07

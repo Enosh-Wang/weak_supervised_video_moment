@@ -73,7 +73,7 @@ class Runner(object):
         # compute the encoding for all the validation images and captions
         score_index, video_lengths = self.encode_data(val_loader, is_training=True)
         # video retrieval
-        r13, r15, r17 = t2i(self.dataframe, score_index, video_lengths)
+        r13, r15, r17 = t2i(self.dataframe, score_index, video_lengths, is_training=True)
         logging.info("Text to video: %.1f, %.1f, %.1f" % (r13, r15, r17))
         # sum of recalls to be used for early stopping
         currscore = r13 + r15 + r17
@@ -253,12 +253,13 @@ class Runner(object):
                              'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                              .format(iters, len(data_loader), batch_time=batch_time))
             del videos, sentences
-
+        '''
         if is_training == False:
             plot_similarity(similarity_all,video_lengths_all,top10_all[:,0],self.dataframe)
             plot_pca(video_embeddings_all,sentence_embeddings_all,self.dataframe)
             plot_sentence(sentence_embeddings_all,self.dataframe)
             plot_video(video_embeddings_all,video_lengths_all,self.dataframe)
+        '''
         return  top10_all, video_lengths_all
 
     def test(self,model_path):
@@ -271,6 +272,6 @@ class Runner(object):
         self.model.load_state_dict(checkpoint['model'])
         print('Computing results...')
         score_index, video_lengths = self.encode_data(test_loader, is_training=False)
-        _, _, _ = t2i(self.dataframe, score_index, video_lengths)
+        _, _, _ = t2i(self.dataframe, score_index, video_lengths, is_training=False)
 
 
