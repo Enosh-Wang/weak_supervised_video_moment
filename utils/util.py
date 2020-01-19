@@ -9,6 +9,15 @@ import numpy as np
 from collections import OrderedDict
 import math
 
+def multihead_mask(x, lengths):
+    seq_size, batch_size, _ = x.size()
+    key_padding_mask = torch.BoolTensor(batch_size,seq_size)
+    for i in range(batch_size):
+        key_padding_mask[i,:lengths[i]] = False
+        key_padding_mask[i,lengths[i]:] = True
+    key_padding_mask = key_padding_mask.cuda()
+    return key_padding_mask
+
 def l2norm(X):
     """L2-normalize columns of X
     """
@@ -23,45 +32,21 @@ def cosine_similarity(x1, x2):
     # batch 矩阵相乘 x1[128,26,1024] x2[128,1024] w1[128,26,1]
     # w1=torch.bmm(x1, x2.unsqueeze(2))
     # <!-改为MIL
+
     batch_size = x1.size()[0]
     x2 = x2.repeat(batch_size,1,1) # [128,128,1024]
     x1 = x1.permute(0,2,1) # [128,1024,14]
     w1 = torch.bmm(x2,x1) # [128,128,14]
+
+    #x2 = x2.permute(0,2,1)
+    #w1 = torch.bmm(x1,x2)
     return w1
-'''
-class PositionalEncoding(nn.Module):
-    "Implement the PE function."
 
-    def __init__(self, d_model, dropout, max_len=100):
-        super(PositionalEncoding, self).__init__()
-        self.dropout = nn.Dropout(p=dropout)
-
-        # Compute the positional encodings once in log space.
-        pe = torch.zeros(max_len, d_model)
-        position = torch.arange(0., max_len).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0., d_model, 2) *
-                             -(math.log(10000.0) / d_model))
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        pe = pe.unsqueeze(0) #[1,max_len,d_model]
-        
-        self.register_buffer('pe', pe)
-
-    def forward(self, x): # video : [batch_size,len,d_model]
-        #x = x + self.pe[:, :x.size(1)]
-        p = self.pe[:, :x.size(1)].repeat(x.size(0),1,1)
-        x = torch.cat((x,p),dim = 2)
-        return self.dropout(x)
-'''
 class PositionalEncoding(nn.Module):
     """Inject some information about the relative or absolute position of the tokens
         in the sequence. The positional encodings have the same dimension as
         the embeddings, so that the two can be summed. Here, we use sine and cosine
         functions of different frequencies.
-    math:
-        \text{PosEncoder}(pos, 2i) = sin(pos/10000^(2i/d_model))
-        \text{PosEncoder}(pos, 2i+1) = cos(pos/10000^(2i/d_model))
-        \text{where pos is the word position and i is the embed idx)
     Args:
         d_model: the embed dim (required).
         dropout: the dropout value (default=0.1).

@@ -16,11 +16,11 @@ def parse_args():
                     help='Path to save the model and Tensorboard log.')
     parser.add_argument('--model_name', default='default',
                         help='model name')
-    parser.add_argument('--num_epochs', default=80, type=int,
+    parser.add_argument('--num_epochs', default=50, type=int,
                         help='Number of training epochs.')
     parser.add_argument('--learning_rate', default=.001, type=float,
                         help='Initial learning rate.') # 论文中设为0.001
-    parser.add_argument('--lr_update', default=40, type=int,
+    parser.add_argument('--lr_update', default=25, type=int,
                         help='Number of epochs to update the learning rate.') # 论文中为15
     parser.add_argument('--vocab_path', default='./vocab/',
                         help='Path to saved vocabulary pickle files.')
@@ -32,8 +32,18 @@ def parse_args():
                         help='Dimensionality of the word embedding.')
     parser.add_argument('--joint_dim', default=1024, type=int,
                         help='Dimensionality of the joint embedding.')
+    parser.add_argument('--sentence_heads', default=8, type=int,
+                        help='')
+    parser.add_argument('--video_heads', default=8, type=int,
+                        help='')
+    parser.add_argument('--sentence_attn_layers', default=2, type=int,
+                        help='')
+    parser.add_argument('--video_attn_layers', default=2, type=int,
+                        help='')
     parser.add_argument('--grad_clip', default=2., type=float,
                         help='Gradient clipping threshold.')
+    parser.add_argument('--dropout', default=0.1, type=float,
+                        help='The dropout value.')
     parser.add_argument('--RNN_layers', default=1, type=int,
                         help='Number of GRU layers.')
     parser.add_argument('--workers', default=10, type=int,
@@ -60,9 +70,15 @@ if __name__ == '__main__':
     opt = parse_args()
     print(opt)
     logging.basicConfig(format='%(asctime)s %(message)s', level=logging.INFO)
-    train_runner = Runner(opt,is_training = True)
-    train_runner.train()
-    test_runner = Runner(opt, is_training = False)
-    test_runner.test(os.path.join(opt.model_path,opt.model_name))
+
+    for i in range(5):
+        for j in range(4):
+            opt.video_attn_layers = i+1
+            opt.video_heads = 2**(j)
+            opt.model_name = str(i)+'+'+str(j)
+            train_runner = Runner(opt,is_training = True)
+            train_runner.train()
+            test_runner = Runner(opt, is_training = False)
+            test_runner.test(os.path.join(opt.model_path,opt.model_name))
 
 

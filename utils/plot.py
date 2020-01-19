@@ -90,17 +90,17 @@ def plot_similarity(similarity_all,video_lengths,top1,df):
     start_segment=df['start_segment']
     end_segment=df['end_segment']
 
-    for index,similarity in similarity_all:
+    for (index,similarity) in similarity_all:
         # 视频的长度
-        batch_size = similarity.size(0)
+        batch_size = similarity.shape[0]
         max_similarity = np.max(similarity)
-        for i in range(batch_size):
-            len_video=int(video_lengths[index[i]])
+        for ind in range(batch_size):
+            len_video=int(video_lengths[index[ind]])
 
             break_128=int(np.floor(len_video*2/3))
 
-            gt_start = start_segment[index[i]]
-            gt_end = end_segment[index[i]]
+            gt_start = start_segment[index[ind]]
+            gt_end = end_segment[index[ind]]
 
             # 计算GT和所有滑窗的iou
             start_128 = range(break_128)
@@ -119,7 +119,7 @@ def plot_similarity(similarity_all,video_lengths,top1,df):
 
             # 统计128窗口的得分分布情况
             # 标准差
-            score = similarity[i,:len_video]
+            score = similarity[ind,:len_video]
             score_std = np.std(score)
             if score_std < 0.025 :
                 small_std += 1
@@ -144,7 +144,7 @@ def plot_similarity(similarity_all,video_lengths,top1,df):
                 local_max += 1
 
             # 起始帧
-            rank1_start=top1[index[i]]
+            rank1_start=top1[index[ind]]
             if (rank1_start<break_128):
                 # 128的滑窗
                 pre_128 += 1
@@ -198,7 +198,7 @@ def plot_similarity(similarity_all,video_lengths,top1,df):
             plt.xlabel('len: %d,  break_128: %d,  rank1: %d,  std: %0.3f,  local_max: %d'
                         %(len_video,break_128,rank1_start,score_std,local_max_cnt))
             plt.title('GT: %d-%d,  Pre: %d-%d,  IOU: %0.2f'%(gt_start,gt_end,rank1_start_seg,rank1_end_seg,iou))
-            plt.savefig(os.path.join(path,str(index[i])+'.png'))
+            plt.savefig(os.path.join(path,str(index[ind])+'.png'))
             plt.close(f)
 
     print('pre_128: %d,  pre_256: %d,  gt_128: %d,  gt_256: %d,  too_small: %d,  too_large: %d,  small_std: %d,  local_max: %d,  too_small_iou: %d'

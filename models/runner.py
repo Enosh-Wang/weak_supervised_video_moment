@@ -1,7 +1,6 @@
 import torch
 import numpy as np
 from collections import OrderedDict
-from torch.nn.utils.clip_grad import clip_grad_norm
 from torch.backends import cudnn
 from models.model import Model
 from torch.utils.tensorboard import SummaryWriter
@@ -111,7 +110,7 @@ class Runner(object):
             loss.backward()
             if self.grad_clip > 0:
                 # 正则化
-                clip_grad_norm(self.model.parameters(), self.grad_clip) #???????????????????????????????
+                torch.nn.utils.clip_grad.clip_grad_norm_(self.model.parameters(), self.grad_clip)
             self.optimizer.step()
 
             # measure elapsed time
@@ -243,7 +242,7 @@ class Runner(object):
             video_lengths_all[index] = video_lengths
             video_embeddings_all[index] = video_embedding_temp
             sentence_embeddings_all[index] = sentence_embedding.data.cpu().numpy().copy()
-            similarity_all.append(zip(index,similarity_positive))
+            similarity_all.append((index,similarity_positive))
 
             # measure elapsed time
             batch_time.update(time.time() - end)
@@ -264,7 +263,7 @@ class Runner(object):
 
     def test(self,model_path):
         # optionally resume from a checkpoint
-        checkpoint = torch.load(model_path)
+        checkpoint = torch.load(os.path.join(model_path,'model_best.pth.tar'))
         opt = checkpoint['opt']
         print(opt)
         print('Loading dataset')

@@ -9,8 +9,8 @@ def Criterion(similarity, captions, caption_lengths, video_lengths, caption_pred
     """
     Compute loss
     """
-    target_captions = pack_padded_sequence(captions,caption_lengths)[0]
-    caption_loss = F.cross_entropy(caption_predict,target_captions)
+    #target_captions = pack_padded_sequence(captions,caption_lengths)[0]
+    #caption_loss = F.cross_entropy(caption_predict,target_captions)
     # 取对角线元素 2D -> 1D
     # view的作用类似reshape
     scores = torch.max(similarity,2)[0]
@@ -53,12 +53,14 @@ def Criterion(similarity, captions, caption_lengths, video_lengths, caption_pred
         tp_tensor,tp_arg = torch.max(positive_bag,dim=0,keepdim=True)
         tp1 = tp_tensor.expand_as(similarity[i,i,:])
         cost_p[i] = (margin + positive_bag - tp1).clamp(min=0)
+        #cost_p[i] = (margin - positive_bag + tp1).clamp(min=0)
         cost_p[i,tp_arg] = 0
 
         negative_bag = similarity[:,i,tp_arg]
         negative_bag = torch.squeeze(negative_bag)
         tp2 = tp_tensor.expand_as(negative_bag)
         cost_n[i] = (margin + negative_bag - tp2).clamp(min=0)
+        #cost_n[i] = (margin - negative_bag + tp2).clamp(min=0)
         cost_n[i,i] = 0
         
     #cost_p = cost_p.max(1)[0]
@@ -81,4 +83,4 @@ def Criterion(similarity, captions, caption_lengths, video_lengths, caption_pred
     for i in range(size[0]):
         cost_sparse[i,:video_lengths[i]] = similarity[i,i,:video_lengths[i]]
     '''
-    return cost_p.sum()+cost_n.sum()+caption_loss#+cost_n.sum()#cost_im.sum()+cost_s.sum() #+  #+ lambda_1*cost_smooth.pow(2).sum() + lambda_2*cost_sparse.abs().sum()
+    return cost_p.sum()+cost_n.sum()#+caption_loss#+cost_n.sum()#cost_im.sum()+cost_s.sum() #+  #+ lambda_1*cost_smooth.pow(2).sum() + lambda_2*cost_sparse.abs().sum()

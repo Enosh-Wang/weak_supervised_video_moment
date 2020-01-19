@@ -18,8 +18,10 @@ class VideoCaption(nn.Module):
 
     def forward(self, video_embedding, caption_word_embedding, caption_length):
         # img_feats是1024维的向量,通过全连接层转为300维的向量,和词向量一样
+
         video_embedding = self.fc(video_embedding).unsqueeze(0)
         # 将img_feats看成第一个词的词向量 
+        caption_word_embedding = caption_word_embedding.transpose(0,1)
         caption_word_embedding = torch.cat([video_embedding, caption_word_embedding], 0)
         # PackedSequence
         packed_embeddings = pack_padded_sequence(caption_word_embedding, caption_length)

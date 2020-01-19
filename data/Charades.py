@@ -45,36 +45,10 @@ class Charades(data.Dataset):
         video_feat1=scikit.block_reduce(video_feat, block_size=(8, 1), func=np.mean)
         # 256 frame features 256帧的滑动窗口 16*16 shape=(4,4096)
         video_feat2=scikit.block_reduce(video_feat, block_size=(16, 1), func=np.mean)
-        # 添加上下文信息
-        
-        video_feat_global = np.mean(video_feat,axis=0,keepdims=True)
 
-        feat1_length = len(video_feat1)
-        video_feat1_left = np.zeros_like(video_feat1)
-        video_feat1_left[0] = video_feat1[0]
-        video_feat1_left[range(1,feat1_length)] = video_feat1[range(feat1_length-1)]
-        video_feat1_right = np.zeros_like(video_feat1)
-        video_feat1_right[-1] = video_feat1[-1]
-        video_feat1_right[range(feat1_length-1)] = video_feat1[range(1,feat1_length)]
-        video_feat1_global = np.repeat(video_feat_global,feat1_length,axis=0)
-
-        feat2_length = len(video_feat2)
-        video_feat2_left = np.zeros_like(video_feat2)
-        video_feat2_left[0] = video_feat2[0]
-        video_feat2_left[range(1,feat2_length)] = video_feat2[range(feat2_length-1)]
-        video_feat2_right = np.zeros_like(video_feat2)
-        video_feat2_right[-1] = video_feat2[-1]
-        video_feat2_right[range(feat2_length-1)] = video_feat2[range(1,feat2_length)]
-        video_feat2_global = np.repeat(video_feat_global,feat2_length,axis=0)
-
-        video_feat1_context = np.concatenate((video_feat1_left,video_feat1,video_feat1_right),axis=1)
-        video_feat2_context = np.concatenate((video_feat2_left,video_feat2,video_feat2_right),axis=1)
         # concatenation of all 128 frame feature and 256 frame feature
         # 拼接多尺滑窗 shape = (6,4096)
-        
-        video_feat=np.concatenate((video_feat1_context,video_feat2_context),axis=0)
-        
-        #video_feat=np.concatenate((video_feat1,video_feat2),axis=0)
+        video_feat=np.concatenate((video_feat1,video_feat2),axis=0)
 
 
         # 数组转成tensor
