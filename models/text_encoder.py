@@ -10,15 +10,16 @@ class TextEncoder(nn.Module):
         super(TextEncoder, self).__init__() 
 
         self.opt = opt
-        #self.PE = PositionalEncoding(d_model=opt.word_dim,dropout=opt.dropout,max_len=1000)
-        #self.attention = nn.ModuleList([nn.MultiheadAttention(embed_dim=opt.joint_dim,num_heads=opt.sentence_heads) for _ in range(opt.sentence_attn_layers)])
-        self.rnn = nn.GRU(opt.word_dim, opt.joint_dim//2, opt.RNN_layers, bidirectional=True)
+        self.PE = PositionalEncoding(d_model=opt.word_dim,dropout=opt.dropout,max_len=1000)
+        self.attention = nn.ModuleList([nn.MultiheadAttention(embed_dim=opt.word_dim,num_heads=opt.sentence_heads) for _ in range(opt.sentence_attn_layers)])
+        #self.rnn = nn.GRU(opt.word_dim, opt.joint_dim//2, opt.RNN_layers, bidirectional=True)
+        self.fc = nn.Linear(opt.word_dim,opt.joint_dim)
 
     def forward(self, sentences, sentence_lengths):
         """Handles variable size captions
         """
         sentences = sentences.transpose(0,1)
-        '''
+
         mask = multihead_mask(sentences, sentence_lengths)
         sentences = self.PE(sentences)
 
@@ -27,6 +28,7 @@ class TextEncoder(nn.Module):
             sentences, _ = layer(sentences,sentences,sentences,mask)
             sentences = F.dropout(sentences,self.opt.dropout,self.training)
             sentences = sentences + res
+
 
         '''
         packed = pack_padded_sequence(sentences, sentence_lengths)
@@ -41,7 +43,8 @@ class TextEncoder(nn.Module):
         sentences = torch.gather(sentences, 1, I).squeeze(1)
         # normalization in the joint embedding space
         sentences = l2norm(sentences)
-        
-        #sentences = sentences.transpose(0,1)
-        return sentences#,mask
+        '''
+        sentences = sentences.transpose(0,1)
+        sentences = self.fc(sentences)
+        return sentences, mask
 

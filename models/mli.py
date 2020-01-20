@@ -16,24 +16,24 @@ class MLI(nn.Module):
         self.interaction = nn.Linear(opt.joint_dim,opt.joint_dim)
         self.cross_dim = nn.Linear(opt.joint_dim,opt.joint_dim)
         self.cross_channel = nn.Linear(opt.num_sets**2,opt.num_sets**2)
-        self.Qv = nn.Linear(opt.join_dim,128)
-        self.Qs = nn.Linear(opt.join_dim,128)
-        self.K = nn.Linear(opt.join_dim,128)
-        self.V = nn.Linear(opt.join_dim,128)
+        self.Qv = nn.Linear(opt.joint_dim,128)
+        self.Qs = nn.Linear(opt.joint_dim,128)
+        self.K = nn.Linear(opt.joint_dim,128)
+        self.V = nn.Linear(opt.joint_dim,128)
     
     def forward(self,videos,videos_mask,sentences,sentences_mask):
 
         weights = self.video_linear(videos).transpose(1,2)
         mask = videos_mask.unsqueeze(1)
         mask = mask.expand_as(weights)
-        masked_videos = videos.masked_fill(mask == True, float('-inf'))
+        masked_videos = weights.masked_fill(mask == True, float('-inf'))
         weights = F.softmax(masked_videos,dim=-1)
         videos_latent = torch.bmm(weights,videos)
 
         weights = self.sentence_linear(sentences).transpose(1,2)
         mask = sentences_mask.unsqueeze(1)
         mask = mask.expand_as(weights)
-        masked_sentences = sentences.masked_fill(mask == True, float('-inf'))
+        masked_sentences = weights.masked_fill(mask == True, float('-inf'))
         weights = F.softmax(masked_sentences,dim=-1)
         sentences_latent = torch.bmm(weights,sentences)
 

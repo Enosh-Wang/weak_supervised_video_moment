@@ -6,6 +6,7 @@ from models.video_caption import VideoCaption
 from models.video_encoder import VideoEncoder
 from models.loss import Criterion
 from models.tanh_attention import TanhAttention
+from models.mli import MLI
 from utils.util import cosine_similarity
 
 class Model(nn.Module):
@@ -17,14 +18,17 @@ class Model(nn.Module):
         self.video_encoder = VideoEncoder(opt)
         self.text_encoder = TextEncoder(opt)
         self.tanh_attention = TanhAttention(opt.joint_dim)
+        self.mli = MLI(opt)
         #self.video_caption = VideoCaption(opt.joint_dim, opt.word_dim, opt.RNN_layers, vocab)
     
     def forward(self, videos, sentences, sentence_lengths, video_lengths, margin, is_training):
 
         word_embedding = self.word_embedding(sentences)
-        sentence_embedding  = self.text_encoder(word_embedding, sentence_lengths)
+        sentence_embedding, sentence_mask = self.text_encoder(word_embedding, sentence_lengths)
         video_embedding, video_mask= self.video_encoder(videos, video_lengths)
-        #sentence_embedding = torch.mean(sentence_embedding,dim=1)
+
+        video_embedding,sentence_embedding = self.mli(video_embedding, video_mask,sentence_embedding, sentence_mask)
+        sentence_embedding = torch.mean(sentence_embedding,dim=1)
         #frame_special_sentence = self.tanh_attention(video_embedding,sentence_embedding,sentence_mask)
         similarity = cosine_similarity(video_embedding, sentence_embedding)
         
