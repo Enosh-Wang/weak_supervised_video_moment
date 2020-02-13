@@ -39,14 +39,11 @@ class ActivityNet(data.Dataset):
 
         videos=self.videos
         description=self.description
-        # load C3D feature 单个视频读取
+        # load C3D feature 单个视频读取 shape=(n,4096)
         video_feat=self.feature[videos[index]]['c3d_features']
-        # 128 frame features 128帧的滑动窗口 8*16 shape=(2,4096)
-        video_feat1=scikit.block_reduce(video_feat, block_size=(2*8, 1), func=np.mean)
-        # 256 frame features 256帧的滑动窗口 16*16 shape=(4,4096)
-        video_feat2=scikit.block_reduce(video_feat, block_size=(2*16, 1), func=np.mean)
-        
-        video_feat=np.concatenate((video_feat1,video_feat2),axis=0)
+        # 采样non-overlap的clip,16帧一个clip
+        video_feat = video_feat[0::2]
+        video_feat=scikit.block_reduce(video_feat, block_size=(4, 1), func=np.mean)
 
         # 数组转成tensor
         video = torch.Tensor(video_feat)

@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from models.text_encoder import TextEncoder
+from models.text_encoder import TextEncoderMulti,TextEncoderGRU
 from models.video_caption import VideoCaption
 from models.video_encoder import VideoEncoder
 from models.loss import Criterion
@@ -9,14 +9,14 @@ from models.tanh_attention import TanhAttention
 from models.mli import MLI
 from utils.util import cosine_similarity
 
-class Model(nn.Module):
+class Model_vocab(nn.Module):
 
     def __init__(self, opt, vocab):
         super().__init__()
         self.word_embedding = nn.Embedding(opt.vocab_size, opt.word_dim)
         self.word_embedding.weight.data.uniform_(-0.1, 0.1)
         self.video_encoder = VideoEncoder(opt)
-        self.text_encoder = TextEncoder(opt)
+        self.text_encoder = TextEncoderMulti(opt)
         self.tanh_attention = TanhAttention(opt.joint_dim)
         self.mli = MLI(opt)
         #self.video_caption = VideoCaption(opt.joint_dim, opt.word_dim, opt.RNN_layers, vocab)
@@ -54,4 +54,32 @@ class Model(nn.Module):
         
         return video_embedding,sentence_embedding,True,similarity,loss
 
+class Model(nn.Module):
+
+    def __init__(self, opt, vocab):
+        super().__init__()
+        self.video_encoder = VideoEncoder(opt)
+        self.text_encoder = TextEncoderMulti(opt)
+        self.GRU = TextEncoderGRU(opt)
+        self.mli = MLI(opt)
+    
+    def forward(self, videos, sentences, sentence_lengths, video_lengths, margin, is_training):
+
+        #sentence_embedding, sentence_mask = self.text_encoder(sentences, sentence_lengths)
+        sentence_embedding = self.GRU(sentences,sentence_lengths)
+        video_embedding, video_mask= self.video_encoder(videos, video_lengths)
+        sentence_mask = torch.ones(sentence_embedding.size(0),1).bool().cuda()
+        video_embedding,sentence_embedding = self.mli(video_embedding, video_mask,sentence_embedding.unsqueeze(1), sentence_mask)
+        #sentence_embedding = torch.mean(sentence_embedding,dim=1)   
+        similarity = cosine_similarity(video_embedding, sentence_embedding.squeeze(1))
+        
+        # 加mask,计算softmax
+        mask = video_mask.unsqueeze(1)
+        mask = mask.expand_as(similarity)
+        masked_similarity = similarity.masked_fill(mask == True, float('-inf'))
+        similarity = F.softmax(masked_similarity,dim=-1)
+
+        loss = Criterion(similarity,sentences,sentence_lengths,video_lengths,True,margin)
+        
+        return video_embedding,sentence_embedding,True,similarity,loss
 

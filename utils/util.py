@@ -9,6 +9,16 @@ import numpy as np
 from collections import OrderedDict
 import math
 
+from gensim.test.utils import datapath, get_tmpfile
+from gensim.models import KeyedVectors
+from gensim.scripts.glove2word2vec import glove2word2vec
+import pickle
+
+def load_glove(glove_path):
+    with open(glove_path, 'rb') as f:
+        word2vec = pickle.load(f)
+    return word2vec
+
 def multihead_mask(x, lengths):
     seq_size, batch_size, _ = x.size()
     key_padding_mask = torch.BoolTensor(batch_size,seq_size)

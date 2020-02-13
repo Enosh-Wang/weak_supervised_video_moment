@@ -10,10 +10,11 @@ import pandas
 import os
 import time
 import shutil
-from utils.util import AverageMeter,t2i
+from utils.util import AverageMeter,t2i,load_glove
 from utils.plot import plot_similarity,plot_pca,plot_sentence,plot_video
 import pickle
 from utils.vocab import Vocabulary
+
 
 class Runner(object):
 
@@ -22,6 +23,7 @@ class Runner(object):
         self.opt = opt
         self.is_training = is_training
         self.vocab = self.get_vocab()
+        self.word2vec = load_glove(opt.glove_path)
         self.opt.vocab_size = len(self.vocab)
         self.grad_clip = self.opt.grad_clip
         self.model = Model(self.opt,self.vocab)
@@ -41,8 +43,10 @@ class Runner(object):
 
         # Load data loaders
         # 加载数据集
-        train_loader = get_data_loader(self.opt, self.vocab, 'train', True)
-        val_loader = get_data_loader(self.opt, self.vocab, 'val', False)
+        #train_loader = get_data_loader(self.opt, self.vocab, 'train', True)
+        #val_loader = get_data_loader(self.opt, self.vocab, 'val', False)
+        train_loader = get_data_loader(self.opt, self.word2vec, 'train', True)
+        val_loader = get_data_loader(self.opt, self.word2vec, 'val', False)
 
         # optionally resume from a checkpoint
         if self.opt.resume:
@@ -268,7 +272,7 @@ class Runner(object):
         opt = checkpoint['opt']
         print(opt)
         print('Loading dataset')
-        test_loader = get_data_loader(self.opt, self.vocab, 'test', False)
+        test_loader = get_data_loader(self.opt, self.word2vec, 'test', False)
         self.model.load_state_dict(checkpoint['model'])
         print('Computing results...')
         score_index, video_lengths = self.encode_data(test_loader, is_training=False)
