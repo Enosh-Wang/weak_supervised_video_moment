@@ -7,64 +7,8 @@ import numpy as np
 import pandas
 import scipy.io as sio
 import skimage.measure as scikit
-
-
-
-class CharadesVocab(data.Dataset):
-    """
-    Load precomputed sentences and video features
-    """
-
-    def __init__(self, data_split, data_path, vocab):
-        """
-        根据选定的数据集，读取csv文件，获取视频列表和标注信息，例如charades_test.csv
-        """
-        self.vocab=vocab
-        path=data_path+"/caption/charades_"+ str(data_split) + ".csv"
-        df=pandas.read_csv(path)
-        df_temp = pandas.read_csv(path,dtype={'ID': object})
-        # 视频名称列表
-        self.videos = df_temp['video']
-        # 描述语句列表
-        self.description=df['description']
-        # 数据集划分
-        self.data_split=data_split
-        # 数据集地址
-        self.data_path=data_path
-
-    def __getitem__(self, index):
-
-        videos=self.videos
-        description=self.description
-        # load C3D feature 单个视频读取
-        video_feat_file=self.data_path+"/c3d_features/"+str(videos[index])+".mat"
-        video_feat_mat = sio.loadmat(video_feat_file)
-        video_feat=video_feat_mat['feature']
-
-        video_feat=scikit.block_reduce(video_feat, block_size=(4, 1), func=np.mean)
-
-        # 数组转成tensor
-        video = torch.Tensor(video_feat)
-        sentence = description[index]
-        vocab = self.vocab
-
-        # Convert sentence (string) to word ids.
-        # 分词
-        words = nltk.tokenize.word_tokenize(
-            str(sentence).lower())
-        sentence = []
-        # 开头结尾添加分隔符
-        sentence.append(vocab('<start>'))
-        sentence.extend([vocab(word) for word in words])
-        sentence.append(vocab('<end>'))
-        # 转为tensor
-        sentence = torch.Tensor(sentence)
-        # video [6,4096] sentence [12] index 2059
-        return video, sentence, index
-
-    def __len__(self):
-        # 长度按照句子数量，其实就是pair的数量
-        return len(self.description)
+import pickle
+import json
 
 class Charades(data.Dataset):
     """
@@ -86,39 +30,81 @@ class Charades(data.Dataset):
         self.data_split=data_split
         # 数据集地址
         self.data_path=data_path
+        # 读取特征
+        feature_path = os.path.join(data_path,'charades_n20.pkl')
+        with open(feature_path,'rb') as f:
+            self.feature = pickle.load(f)
 
     def __getitem__(self, index):
 
-        videos=self.videos
-        description=self.description
+        video_name=self.videos[index]
         # load C3D feature 单个视频读取
-        video_feat_file=self.data_path+"/c3d_features/"+str(videos[index])+".mat"
-        video_feat_mat = sio.loadmat(video_feat_file)
-        video_feat=video_feat_mat['feature']
-
-        # 128 frame features 128帧的滑动窗口 8*16 shape=(2,4096)
-        video_feat1=scikit.block_reduce(video_feat, block_size=(8, 1), func=np.mean)
-        # 256 frame features 256帧的滑动窗口 16*16 shape=(4,4096)
-        video_feat2=scikit.block_reduce(video_feat, block_size=(16, 1), func=np.mean)
-
-        # concatenation of all 128 frame feature and 256 frame feature
-        # 拼接多尺滑窗 shape = (6,4096)
-        video_feat=np.concatenate((video_feat1,video_feat2),axis=0)
-
-        #video_feat=scikit.block_reduce(video_feat, block_size=(4, 1), func=np.mean)
+        video_feat=self.feature[video_name]
         video = torch.Tensor(video_feat)
-
-        sentence = description[index]
-
+        # 处理文本特征
+        sentence = self.description[index]
         words = nltk.tokenize.word_tokenize(str(sentence).lower())
-
         sentence = np.asarray([self.word2vec[word] for word in words if word in self.word2vec])
         sentence = torch.Tensor(sentence)
-        return video, sentence, index
+        return video, sentence, index, video_name
 
     def __len__(self):
         # 长度按照句子数量，其实就是pair的数量
         return len(self.description)
+
+class CharadesGCN(data.Dataset):
+    """
+    Load precomputed sentences and video features
+    """
+
+    def __init__(self, data_split, data_path, word2vec):
+        """
+        根据选定的数据集，读取csv文件，获取视频列表和标注信息，例如charades_test.csv
+        """
+        self.word2vec = word2vec
+        path=data_path+"/caption/charades_"+ str(data_split) + "_nlp.csv"
+        df=pandas.read_csv(path)
+        # 视频名称列表
+        self.videos = df['video']
+        # 描述语句列表
+        self.words = df['words']
+        self.id2pos = df['id2pos']
+        self.sentence_mat = df['mat']
+        # 数据集划分
+        self.data_split=data_split
+        # 数据集地址
+        self.data_path=data_path
+        # 读取特征
+        feature_path = os.path.join(data_path,'charades_n20.pkl')
+        with open(feature_path,'rb') as f:
+            self.feature = pickle.load(f)
+        
+        with open('/home/share/wangyunxiao/ContrastiveLosses4VRD/Outputs/all_matrix_file_100_30.json','r') as f:
+            self.video_mat = json.load(f)
+
+    def __getitem__(self, index):
+
+        video_name = self.videos[index]
+        # load C3D feature 单个视频读取
+        video_feat = self.feature[video_name]
+        video = torch.Tensor(video_feat)
+        video_mat = np.asarray(self.video_mat[video_name])
+        video_mat = torch.Tensor(video_mat)
+        # 处理文本特征
+        words = self.words[index]
+        words = np.asarray([self.word2vec[word] for word in words]) # if word in self.word2vec
+        sentence = torch.Tensor(words)
+
+        id2pos = np.asarray(self.id2pos[index],dtype=np.int)
+        sentence_mat = np.asarray(self.sentence_mat[index])
+        # 三者单标的分词数目应相等
+        assert id2pos.shape[0] == sentence_mat.shape[0] == words.shape[0]
+        
+        return video, video_mat, sentence, id2pos, sentence_mat, index, video_name
+
+    def __len__(self):
+        # 长度按照句子数量，其实就是pair的数量
+        return len(self.words)
 
 
 

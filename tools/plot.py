@@ -5,6 +5,25 @@ import matplotlib
 matplotlib.use('agg')
 import matplotlib.pyplot as plt
 
+def plot_map(score_maps, index, tscale):
+    # 可视化保存路径
+    path = os.path.join('img','map')
+    if not os.path.exists(path):
+        os.makedirs(path)
+    
+    batch_size = score_maps.shape[0]
+    for i in range(batch_size):
+        score_map = score_maps[i]
+        f = plt.figure(figsize=(6,4))
+        plt.matshow(score_map, cmap = plt.cm.cool)
+        plt.ylabel("duration")
+        plt.xlabel("start time")
+        plt.colorbar()
+        plt.savefig(os.path.join(path,str(index[i])+'.png'))
+        plt.close(f)
+        
+
+
 def plot_pca(video_embeddings,sentence_embeddings,df):
 
     # 可视化保存路径

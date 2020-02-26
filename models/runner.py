@@ -1,6 +1,5 @@
 import torch
 import numpy as np
-from collections import OrderedDict
 from torch.backends import cudnn
 from models.model import Model
 from torch.utils.tensorboard import SummaryWriter
@@ -10,11 +9,12 @@ import pandas
 import os
 import time
 import shutil
-from utils.util import AverageMeter,t2i,load_glove
-from utils.plot import plot_similarity,plot_pca,plot_sentence,plot_video
+from tools.util import AverageMeter,t2i,load_glove
+from tools.plot import plot_similarity,plot_pca,plot_sentence,plot_video,plot_map
+from tools.vocab import Vocabulary
+from tools.post_processing import post_processing
 import pickle
-from utils.vocab import Vocabulary
-
+from tools.bad_grad_viz import register_hooks
 
 class Runner(object):
 
@@ -22,29 +22,25 @@ class Runner(object):
 
         self.opt = opt
         self.is_training = is_training
-        self.vocab = self.get_vocab()
         self.word2vec = load_glove(opt.glove_path)
-        self.opt.vocab_size = len(self.vocab)
-        self.grad_clip = self.opt.grad_clip
-        self.model = Model(self.opt,self.vocab)
+        self.grad_clip = opt.grad_clip
+        self.model = Model(opt)
 
         if torch.cuda.is_available():
             self.model = self.model.cuda()
             cudnn.benchmark = True
 
-        self.optimizer = torch.optim.Adam(list(self.model.parameters()), lr=self.opt.learning_rate)
-        self.logger = SummaryWriter(os.path.join(self.opt.model_path,self.opt.model_name), flush_secs=5)
+        self.optimizer = torch.optim.Adam(list(self.model.parameters()), lr=opt.learning_rate)
+        self.logger = SummaryWriter(os.path.join(opt.model_path,opt.model_name), flush_secs=5)
         self.iters = 0
         self.start_epoch = 0
-        self.best_rsum = 0
+        self.min_loss = 100000
         self.dataframe = self.get_df()
 
     def train(self):
 
         # Load data loaders
         # 加载数据集
-        #train_loader = get_data_loader(self.opt, self.vocab, 'train', True)
-        #val_loader = get_data_loader(self.opt, self.vocab, 'val', False)
         train_loader = get_data_loader(self.opt, self.word2vec, 'train', True)
         val_loader = get_data_loader(self.opt, self.word2vec, 'val', False)
 
@@ -60,34 +56,50 @@ class Runner(object):
             self.train_one_epoch(train_loader, epoch)
 
             # evaluate on validation set
-            rsum = self.validate(val_loader)
+            val_loss = self.validate(val_loader)
 
             # remember best R@ sum and save checkpoint
-            is_best = rsum > self.best_rsum
-            self.best_rsum = max(rsum, self.best_rsum)
+            is_best = val_loss < self.min_loss
+            self.min_loss = min(val_loss, self.min_loss)
             self.save_checkpoint({
                 'epoch': epoch + 1,
                 'model': self.model.state_dict(),
-                'best_rsum': self.best_rsum,
+                'min_loss': self.min_loss,
                 'opt': self.opt,
                 'iters': self.iters,
             }, is_best, prefix=os.path.join(self.opt.model_path,self.opt.model_name))
     
     def validate(self, val_loader):
-        # compute the encoding for all the validation images and captions
-        score_index, video_lengths = self.encode_data(val_loader, is_training=True)
-        # video retrieval
-        r13, r15, r17 = t2i(self.dataframe, score_index, video_lengths, is_training=True)
-        logging.info("Text to video: %.1f, %.1f, %.1f" % (r13, r15, r17))
-        # sum of recalls to be used for early stopping
-        currscore = r13 + r15 + r17
-        # record metrics in tensorboard
-        self.logger.add_scalar('val/r13', r13, global_step=self.iters)
-        self.logger.add_scalar('val/r15', r15, global_step=self.iters)
-        self.logger.add_scalar('val/r17', r17, global_step=self.iters)
-        self.logger.add_scalar('val/rsum', currscore, global_step=self.iters)
 
-        return currscore
+        # switch to evaluate mode
+        self.model.eval()
+        val_loss = 0
+
+        batch_time = AverageMeter()
+        end = time.time()
+        
+        for iters, (videos, sentences, sentence_lengths, video_lengths, index, video_name) in enumerate(val_loader):
+            if torch.cuda.is_available():
+                videos = videos.cuda()
+                sentences = sentences.cuda()
+            # compute the embeddings
+            with torch.no_grad():
+                _,loss = self.model.forward(videos, sentences, sentence_lengths, video_lengths, video_name, is_training=True)
+
+            # measure elapsed time
+            batch_time.update(time.time() - end)
+            end = time.time()
+            val_loss += loss
+
+            if iters % self.opt.log_step == 0:
+                logging.info('Test: [{0}/{1}]\t'
+                             'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                             .format(iters, len(val_loader), batch_time=batch_time))
+            del videos, sentences
+
+        val_loss = val_loss/len(val_loader)
+        self.logger.add_scalar('val/loss', val_loss, global_step=self.iters)
+        return val_loss
     
     def train_one_epoch(self, train_loader, epoch):
         batch_time = AverageMeter()
@@ -97,7 +109,7 @@ class Runner(object):
         self.model.train()
 
         end = time.time()
-        for i, (videos, sentences, sentence_lengths, video_lengths, index) in enumerate(train_loader):
+        for i, (videos, sentences, sentence_lengths, video_lengths, index, video_name) in enumerate(train_loader):
             # measure data loading time
             data_time.update(time.time() - end)
             self.iters += 1
@@ -107,7 +119,7 @@ class Runner(object):
                 videos = videos.cuda()
                 sentences = sentences.cuda()
 
-            _,_,_,_,loss = self.model.forward(videos, sentences, sentence_lengths, video_lengths, self.opt.margin, is_training=True)
+            _,loss = self.model.forward(videos, sentences, sentence_lengths, video_lengths, video_name, is_training=True)
  
             self.optimizer.zero_grad()
             # compute gradient and do SGD step
@@ -134,7 +146,7 @@ class Runner(object):
             # Record logs in tensorboard
             self.logger.add_scalar('epoch', epoch, global_step=self.iters)
             self.logger.add_scalar('loss', loss, global_step=self.iters)
-            self.logger.add_scalar('lr', self.optimizer.param_groups[0]['lr'])
+            self.logger.add_scalar('lr', self.optimizer.param_groups[0]['lr'], global_step=self.iters)
 
 
     def get_df(self):
@@ -165,13 +177,13 @@ class Runner(object):
             checkpoint = torch.load(self.opt.resume)
             # 恢复参数
             self.start_epoch = checkpoint['epoch']
-            self.best_rsum = checkpoint['best_rsum']
+            self.min_loss = checkpoint['min_loss']
             self.model.load_state_dict(checkpoint['model'])
             # Eiters is used to show logs as the continuation of another
             # 使日志连续
             self.iters = checkpoint['iters']
-            print("=> loaded checkpoint '{}' (epoch {}, best_rsum {})"
-                .format(self.opt.resume, self.start_epoch, self.best_rsum))
+            print("=> loaded checkpoint '{}' (epoch {}, min_loss {})"
+                .format(self.opt.resume, self.start_epoch, self.min_loss))
         else:
             print("=> no checkpoint found at '{}'".format(self.opt.resume))
     
@@ -181,73 +193,35 @@ class Runner(object):
         torch.save(state, path)
         if is_best:
             shutil.copyfile(path, os.path.join(prefix,'model_best.pth.tar'))
-    
-    def get_vocab(self):
-        if self.opt.dataset == 'Charades':
-            vocab = pickle.load(open(os.path.join(self.opt.vocab_path, 'Charades_vocab.pkl'), 'rb'))
-            self.opt.vocab_size = len(vocab)
-        elif self.opt.dataset == 'ActivityNet':
-            vocab = pickle.load(open(os.path.join(self.opt.vocab_path, 'ActivityNet_vocab.pkl'), 'rb'))
-            self.opt.vocab_size = len(vocab)
-        return vocab
 
-    def encode_data(self, data_loader, is_training=True):
-        """Encode all videos and captions loadable by `data_loader`
-        """
-        batch_time = AverageMeter()
+    def test(self,model_path):
+        # optionally resume from a checkpoint
+        checkpoint = torch.load(os.path.join(model_path,'checkpoint.pth.tar'))
+        opt = checkpoint['opt']
+        print(opt)
+        print('Loading dataset')
+        test_loader = get_data_loader(self.opt, self.word2vec, 'test', False)
+        self.model.load_state_dict(checkpoint['model'])
+        print('Computing results...')
+
         # switch to evaluate mode
         self.model.eval()
-
+        batch_time = AverageMeter()
         end = time.time()
-        # 数组，用于保存所有的数据
-        data_length = len(data_loader.dataset)
-        top10_all = np.zeros((data_length, 10))
-        video_lengths_all = np.zeros((data_length))
-        video_embeddings_all = np.zeros((data_length, self.opt.joint_dim))
-        sentence_embeddings_all = np.zeros((data_length, self.opt.joint_dim))
-        similarity_all = [] # 尺寸无法确定
-        
-        for iters, (videos, sentences, sentence_lengths, video_lengths, index) in enumerate(data_loader):
+        all_result = {}
+        for iters, (videos, sentences, sentence_lengths, video_lengths, index, video_name) in enumerate(test_loader):
             if torch.cuda.is_available():
                 videos = videos.cuda()
                 sentences = sentences.cuda()
             # compute the embeddings
             with torch.no_grad():
-                video_embedding,sentence_embedding,caption_predict,similarity,loss = self.model.forward(videos, sentences, sentence_lengths, video_lengths, self.opt.margin, is_training=True)
-            # 提取对角线元素
-            size = similarity.size()
-            similarity_diag = torch.zeros(size[0],size[2])
-            for i in range(size[0]):
-                similarity_diag[i,:] = similarity[i,i,:]
+                confidence_map,loss = self.model.forward(videos, sentences, sentence_lengths, video_lengths, video_name, is_training=False)
 
-            # padding 滑窗个数不足十个padding到十个
-            if(similarity_diag.size(1)<10):
-                similarity_positive=torch.zeros(similarity_diag.size(0),10)
-                similarity_positive[:,:similarity_diag.size(1)]=similarity_diag
-            else:
-                similarity_positive=similarity_diag
-
-            batch_length=similarity_positive.size(0)
+            confidence_map = confidence_map.detach().cpu().numpy()
+            plot_map(confidence_map,index,self.opt.temporal_scale)
+            batch_result = self.generate_proposal(confidence_map, index)
             
-            # 保留每个batch中每个样本的前十个结果的序号
-            video_embedding = video_embedding.data.cpu().numpy().copy()
-            similarity_positive = similarity_positive.data.cpu().numpy().copy()
-
-            video_embedding_temp = np.zeros((batch_length,self.opt.joint_dim))
-            top10= np.zeros((batch_length, 10), dtype=int)
-
-            for k in range(batch_length):
-                temp=similarity_positive[k,:]
-                top10[k,:]=np.argsort(-temp)[0:10]
-                video_embedding_temp[k,:]=video_embedding[k,top10[k,0],:]
-        
-            # preserve the embeddings by copying from gpu and converting to numpy
-            top10_all[index] = top10
-            video_lengths_all[index] = video_lengths
-            video_embeddings_all[index] = video_embedding_temp
-            sentence_embeddings_all[index] = sentence_embedding.data.cpu().numpy().copy()
-            similarity_all.append((index,similarity_positive))
-
+            all_result.update(batch_result)
             # measure elapsed time
             batch_time.update(time.time() - end)
             end = time.time()
@@ -255,27 +229,46 @@ class Runner(object):
             if iters % self.opt.log_step == 0:
                 logging.info('Test: [{0}/{1}]\t'
                              'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                             .format(iters, len(data_loader), batch_time=batch_time))
+                             .format(iters, len(test_loader), batch_time=batch_time))
             del videos, sentences
-        '''
-        if is_training == False:
-            plot_similarity(similarity_all,video_lengths_all,top10_all[:,0],self.dataframe)
-            plot_pca(video_embeddings_all,sentence_embeddings_all,self.dataframe)
-            plot_sentence(sentence_embeddings_all,self.dataframe)
-            plot_video(video_embeddings_all,video_lengths_all,self.dataframe)
-        '''
-        return  top10_all, video_lengths_all
 
-    def test(self,model_path):
-        # optionally resume from a checkpoint
-        checkpoint = torch.load(os.path.join(model_path,'model_best.pth.tar'))
-        opt = checkpoint['opt']
-        print(opt)
-        print('Loading dataset')
-        test_loader = get_data_loader(self.opt, self.word2vec, 'test', False)
-        self.model.load_state_dict(checkpoint['model'])
-        print('Computing results...')
-        score_index, video_lengths = self.encode_data(test_loader, is_training=False)
-        _, _, _ = t2i(self.dataframe, score_index, video_lengths, is_training=False)
+        # 保存路径
+        path = os.path.join("./output/")
+        if not os.path.exists(path):
+            os.makedirs(path)
+        filename = os.path.join(path,self.opt.model_name+'.pkl')
+        with open(filename,'wb') as f:
+            pickle.dump(all_result,f)
+
+        top10_filename = post_processing(filename,self.opt)
+        _, _, _ = t2i(self.dataframe, top10_filename, is_training=False)
+
+    def generate_proposal(self, score_map, index):
+        batch_size = score_map.shape[0]
+        tscale = self.opt.temporal_scale
+        batch_result = {}
+        for i in range(batch_size):
+            results = []
+            for idx in range(tscale):
+                for jdx in range(tscale):
+                    # 起止点的索引
+                    start_index = jdx
+                    end_index = start_index + idx+1
+                    # 如果是上一步中选定的起止点，则进一步验证置信度
+                    if end_index < tscale :
+                        # 置信度得分
+                        score = score_map[i,idx, jdx]
+                        # 保存proposal 坐标是百分比
+                        if score > -1000:
+                            # proposal的坐标
+                            xmin = start_index/tscale
+                            xmax = end_index/tscale
+                            results.append([xmin, xmax, score])
+            results = np.stack(results)
+            batch_result[index[i]] = results
+        return batch_result
+        
+
+
 
 

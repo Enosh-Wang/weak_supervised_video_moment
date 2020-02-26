@@ -2,7 +2,7 @@
 import torch
 from torch import nn
 from torch.nn.utils.rnn import pack_padded_sequence
-from utils.beam_search import CaptionGenerator
+from tools.beam_search import CaptionGenerator
 import time
 
 

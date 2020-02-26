@@ -97,15 +97,6 @@ def cosine_sim(im, s):
     # 标准的矩阵乘法 结果[滑窗个数，单词个数]
     return im.mm(s.t())
 
-
-def order_sim(im, s):
-    """Order embeddings similarity measure $max(0, s-im)$
-    """
-    YmX = (s.unsqueeze(1).expand(s.size(0), im.size(0), s.size(1))
-           - im.unsqueeze(0).expand(s.size(0), im.size(0), s.size(1)))
-    score = -YmX.clamp(min=0).pow(2).sum(2).squeeze(2).sqrt().t()
-    return score
-
 class AverageMeter(object):
     """Computes and stores the average and current value"""
 
@@ -168,19 +159,21 @@ def cIoU(pred, gt):
     union = max(pred[1], gt[1]) + 1 - min(pred[0], gt[0])
     return float(intersection)/union
 
-def t2i( df, attn_index, video_length, is_training, npts=None):
+def t2i( df, filename, is_training):
     """
     Text->videos (Image Search)
     videos: (N, K) matrix of videos
     Captions: (N, K) matrix of captions
     """
     # 读取GT
-    start_segment=df['start_segment']
-    end_segment=df['end_segment']
+    start_time_list = df['start_time']
+    end_time_list = df['end_time']
+    duration_list = df['duration']
 	
-    if npts is None:
-        # pair的数目？
-        npts = attn_index.shape[0]
+    with open(filename,'rb') as f:
+        top10 = pickle.load(f)
+
+    total_length = len(df)
 
     correct_num05=0
     correct_num07=0
@@ -193,111 +186,54 @@ def t2i( df, attn_index, video_length, is_training, npts=None):
     R10IOU5=0
     R10IOU7=0
 	
-    for index in range(int(npts)):
-        # index应该是指pair的索引
-        # 匹配结果的排序列表
-        att_inds=attn_index[index,:]
-        # 视频的长度
-        len_img=video_length[index]
+    for index in range(total_length):
         # 读取GT
-        gt_start=start_segment[index]
-        gt_end=end_segment[index]
-        # 因为将128和256的滑窗拼接在了一起，所以前2/3的特征是128滑窗的，后1/3的特征是256滑窗的
-        break_128=np.floor(len_img*2/3)
-        # 起始帧
-        rank1_start=att_inds[0]
-        if (rank1_start<break_128):
-           # 128的滑窗
-           rank1_start_seg =rank1_start*128
-           rank1_end_seg = rank1_start_seg+128
-        else:
-           # 256的滑窗
-           rank1_start_seg =(rank1_start-break_128)*256
-           rank1_end_seg = rank1_start_seg+256
+        gt_start=start_time_list[index]
+        gt_end=end_time_list[index]
+        duration = duration_list[index]
+        proposal = top10[index]
+        start = proposal[:,0]*duration
+        end = proposal[:,1]*duration
+        num = len(start)
         
         # 计算IOU
-        iou = cIoU((gt_start, gt_end),(rank1_start_seg, rank1_end_seg))
-        if iou>=0.5:
-           correct_num05+=1
+        # r@1
+        iou = cIoU((gt_start, gt_end),(start[0], end[0]))
         if iou>=0.7:
            correct_num07+=1
+        if iou>=0.5:
+           correct_num05+=1
         if iou>=0.3:
            correct_num03+=1
-
-        for j1 in range(5):
-            if (att_inds[j1]<break_128):
-               rank1_start_seg =att_inds[j1]*128
-               rank1_end_seg = rank1_start_seg+128
-            else:
-               rank1_start_seg =(att_inds[j1]-break_128)*256
-               rank1_end_seg = rank1_start_seg+256
-			   
-            iou = cIoU((gt_start, gt_end),(rank1_start_seg, rank1_end_seg))
-            if iou>=0.5:
-               R5IOU5+=1
-               break
-			   
-        for j1 in range(5):
-            if (att_inds[j1]<break_128):
-               rank1_start_seg =att_inds[j1]*128
-               rank1_end_seg = rank1_start_seg+128
-            else:
-               rank1_start_seg =(att_inds[j1]-break_128)*256
-               rank1_end_seg = rank1_start_seg+256
-			   
-            iou = cIoU((gt_start, gt_end),(rank1_start_seg, rank1_end_seg))
+        # R@5
+        for j in range(min(5,num)):
+            iou = cIoU((gt_start, gt_end),(start[j], end[j]))
             if iou>=0.7:
                R5IOU7+=1
                break
-			   
-        for j1 in range(5):
-            if (att_inds[j1]<break_128):
-               rank1_start_seg =att_inds[j1]*128
-               rank1_end_seg = rank1_start_seg+128
-            else:
-               rank1_start_seg =(att_inds[j1]-break_128)*256
-               rank1_end_seg = rank1_start_seg+256
-			   
-            iou = cIoU((gt_start, gt_end),(rank1_start_seg, rank1_end_seg))
+        for j in range(min(5,num)):
+            iou = cIoU((gt_start, gt_end),(start[j], end[j]))
+            if iou>=0.5:
+               R5IOU5+=1
+               break
+        for j in range(min(5,num)):
+            iou = cIoU((gt_start, gt_end),(start[j], end[j]))
             if iou>=0.3:
                R5IOU3+=1
                break
-			   
-        for j1 in range(10):
-            if (att_inds[j1]<break_128):
-               rank1_start_seg =att_inds[j1]*128
-               rank1_end_seg = rank1_start_seg+128
-            else:
-               rank1_start_seg =(att_inds[j1]-break_128)*256
-               rank1_end_seg = rank1_start_seg+256
-			   
-            iou = cIoU((gt_start, gt_end),(rank1_start_seg, rank1_end_seg))
-            if iou>=0.5:
-               R10IOU5+=1
-               break
-			   
-        for j1 in range(10):
-            if (att_inds[j1]<break_128):
-               rank1_start_seg =att_inds[j1]*128
-               rank1_end_seg = rank1_start_seg+128
-            else:
-               rank1_start_seg =(att_inds[j1]-break_128)*256
-               rank1_end_seg = rank1_start_seg+256
-			   
-            iou = cIoU((gt_start, gt_end),(rank1_start_seg, rank1_end_seg))
+		# R@10
+        for j in range(min(10,num)):
+            iou = cIoU((gt_start, gt_end),(start[j], end[j]))
             if iou>=0.7:
                R10IOU7+=1
                break
-			   
-        for j1 in range(10):
-            if (att_inds[j1]<break_128):
-               rank1_start_seg =att_inds[j1]*128
-               rank1_end_seg = rank1_start_seg+128
-            else:
-               rank1_start_seg =(att_inds[j1]-break_128)*256
-               rank1_end_seg = rank1_start_seg+256
-			   
-            iou = cIoU((gt_start, gt_end),(rank1_start_seg, rank1_end_seg))
+        for j in range(min(10,num)):			   
+            iou = cIoU((gt_start, gt_end),(start[j], end[j]))
+            if iou>=0.5:
+               R10IOU5+=1
+               break
+        for j in range(min(10,num)):
+            iou = cIoU((gt_start, gt_end),(start[j], end[j]))
             if iou>=0.3:
                R10IOU3+=1
                break    
@@ -305,23 +241,21 @@ def t2i( df, attn_index, video_length, is_training, npts=None):
 	############################
 
     # Compute metrics
-    R1IoU05=correct_num05
-    R1IoU07=correct_num07
-    R1IoU03=correct_num03
-    total_length=attn_index.shape[0]
-    #print('total length',total_length)
+    R1IOU05=correct_num05
+    R1IOU07=correct_num07
+    R1IOU03=correct_num03
     if is_training == False:
-        print("R@1 IoU0.3: %f" %(R1IoU03/float(total_length)))
+        print("R@1 IoU0.3: %f" %(R1IOU03/float(total_length)))
         print("R@5 IoU0.3: %f" %(R5IOU3/float(total_length)))
         print("R@10 IoU0.3: %f" %(R10IOU3/float(total_length)))
         
-        print("R@1 IoU0.5: %f" %(R1IoU05/float(total_length)))
+        print("R@1 IoU0.5: %f" %(R1IOU05/float(total_length)))
         print("R@5 IoU0.5: %f" %(R5IOU5/float(total_length)))
         print("R@10 IoU0.5: %f" %(R10IOU5/float(total_length)))
         
-        print("R@1 IoU0.7: %f" %(R1IoU07/float(total_length)))
+        print("R@1 IoU0.7: %f" %(R1IOU07/float(total_length)))
         print("R@5 IoU0.7: %f" %(R5IOU7/float(total_length)))
         print("R@10 IoU0.7: %f" %(R10IOU7/float(total_length)))
 	
 	
-    return R1IoU03, R1IoU05, R1IoU07
+    return R1IOU03, R1IOU05, R1IOU07
