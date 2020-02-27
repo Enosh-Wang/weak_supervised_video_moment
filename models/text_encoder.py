@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from tools.util import PositionalEncoding,multihead_mask,l2norm
-from graph_convolution import GraphConvolution
+from models.graph_convolution import GraphConvolution
 
 class TextEncoderMulti(nn.Module):
 

@@ -7,11 +7,12 @@ from models.video_encoder import VideoEncoder
 from models.loss import Criterion
 from models.tanh_attention import TanhAttention
 from models.mli import MLI
-from models.bmn import BMN
+from models.bmn import BMN,Classifier
+from models.bilinear import Bilinear
 from tools.util import cosine_similarity
 import random
 import numpy as np
-
+Bilinear
 class Model(nn.Module):
 
     def __init__(self, opt):
@@ -23,6 +24,8 @@ class Model(nn.Module):
         self.mli = MLI(opt)
         self.fc = nn.Linear(opt.joint_dim*2,1)
         self.bmn = BMN(opt)
+        self.classifier = Classifier(opt)
+        self.bilinear = Bilinear(opt.joint_dim,opt.joint_dim,opt.joint_dim)
         self.real_batch = opt.batch_size
         self.real_negative = opt.negative_num
     
@@ -38,14 +41,24 @@ class Model(nn.Module):
         #sentence_embedding = sentence_embedding.squeeze(1)
         # video_embedding：[128,20,1024] sentence_embedding：[128,1024]
         # similarity = cosine_similarity(video_embedding, sentence_embedding)
-        # confidence_map[128,20,20]
+
         video_embedding = self.bmn(video_embedding)
         negative_sentence,negative_video = self.sample(video_embedding,sentence_embedding,video_name)
+        # [b,c,d,t]
         all_video = torch.cat((video_embedding,negative_video),dim=0)
+        # [b,c]
         all_sentence = torch.cat((sentence_embedding,negative_sentence),dim=0)
 
+        b,c,d,t = all_video.size()
+        all_sentence = all_sentence.view(b,c,1,1).repeat(1,1,d,t)
+        # [b,d,t,c]
+        feature = self.bilinear(all_video.permute(0,2,3,1),all_sentence.permute(0,2,3,1),activate_fn=F.relu)
+        feature = feature.permute(0,3,1,2)
+
+        score = self.classifier(feature)
+
         mask = self.get_mask(self.opt.temporal_scale).unsqueeze(0)
-        score = self.cosine_similarity(all_video, all_sentence)
+        #score = self.cosine_similarity(all_video, all_sentence)
         score = score.masked_fill(mask == 0, float('-inf'))
         all_size = score.size(0)
         score = score.view(all_size,-1)

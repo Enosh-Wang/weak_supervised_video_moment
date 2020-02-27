@@ -4,6 +4,29 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+class Classifier(nn.Module):
+    def __init__(self, opt):
+        super(Classifier, self).__init__()
+        self.opt = opt
+        
+        self.hidden_dim_2d = 128
+        self.x_2d_p = nn.Sequential(
+            nn.Conv2d(self.opt.joint_dim, self.hidden_dim_2d, kernel_size=1),
+            nn.BatchNorm2d(self.hidden_dim_2d),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(self.hidden_dim_2d, self.hidden_dim_2d, kernel_size=3, padding=1),
+            nn.BatchNorm2d(self.hidden_dim_2d),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(self.hidden_dim_2d, self.hidden_dim_2d, kernel_size=3, padding=1),
+            nn.BatchNorm2d(self.hidden_dim_2d),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(self.hidden_dim_2d, 1, kernel_size=1),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        score = self.x_2d_p(x)
+        return score
 
 class BMN(nn.Module):
     def __init__(self, opt):
@@ -14,56 +37,30 @@ class BMN(nn.Module):
         self.num_sample = opt.num_sample # 采样点数目（论文中的N）
         self.num_sample_perbin = opt.num_sample_perbin # 子采样点的数目
 
-        self.hidden_dim_1d = 256
-        self.hidden_dim_2d = 128
-        self.hidden_dim_3d = 512
-
         self._get_interp1d_mask()
-
-        # Base Module
-        self.x_1d_b = nn.Sequential(
-            nn.Conv1d(self.opt.joint_dim, self.hidden_dim_1d*2, kernel_size=3, padding=1, groups=4),
-            nn.ReLU(inplace=True),
-            nn.Conv1d(self.hidden_dim_1d*2, self.hidden_dim_1d, kernel_size=3, padding=1, groups=4),
-            nn.ReLU(inplace=True)
-        )
 
         # Proposal Evaluation Module
         self.x_1d_p = nn.Sequential(
-            nn.Conv1d(self.hidden_dim_1d*2, self.hidden_dim_1d, kernel_size=3, padding=1),
+            nn.Conv1d(self.opt.joint_dim, self.opt.joint_dim, kernel_size=3, padding=1),
+            nn.BatchNorm1d(self.opt.joint_dim),
             nn.ReLU(inplace=True)
         )
         self.x_3d_p = nn.Sequential(
-            nn.Conv3d(self.hidden_dim_1d*2, self.hidden_dim_3d, kernel_size=(self.num_sample, 1, 1)),
-            #nn.ReLU(inplace=True)
+            nn.Conv3d(self.opt.joint_dim, self.opt.joint_dim, kernel_size=(self.num_sample, 1, 1)),
+            nn.BatchNorm3d(self.opt.joint_dim),
+            nn.ReLU(inplace=True)
         )
-        self.x_2d_p = nn.Sequential(
-            nn.Conv2d(self.hidden_dim_3d*2, self.hidden_dim_2d, kernel_size=1),
-            #nn.ReLU(inplace=True),
-            #nn.Conv2d(self.hidden_dim_2d, self.hidden_dim_2d, kernel_size=3, padding=1),
-            #nn.ReLU(inplace=True),
-            #nn.Conv2d(self.hidden_dim_2d, self.hidden_dim_2d, kernel_size=3, padding=1),
-            #nn.ReLU(inplace=True),
-            nn.Conv2d(self.hidden_dim_2d, 1, kernel_size=1),
-            nn.Sigmoid()
-        )
-        self.norm = nn.BatchNorm2d(self.hidden_dim_3d)
 
     def forward(self, video): #, sentence):
-        # 转换维度，维度在前，帧数在后
+        # 转换维度，维度在前，帧数在后 [n,c,l]
         video = video.transpose(1,2)
-        # 两层时序卷积
-        #base_feature = self.x_1d_b(video)
         # 一层时序卷积
-        #confidence_map = self.x_1d_p(video)
+        confidence_map = self.x_1d_p(video)
         # 置信度图
-        confidence_map = self._boundary_matching_layer(video)
+        confidence_map = self._boundary_matching_layer(confidence_map)
         # [128,512,d,t]
         confidence_map = self.x_3d_p(confidence_map).squeeze(2)
-        #sentence = sentence.view(sentence.shape[0],sentence.shape[1],1,1)
-        #confidence_map = torch.cat((confidence_map + sentence,confidence_map*sentence),dim=1)
-        #confidence_map = self.x_2d_p(confidence_map)
-        confidence_map = self.norm(confidence_map)
+
         return confidence_map
 
     def _boundary_matching_layer(self, x):
@@ -141,4 +138,6 @@ class BMN(nn.Module):
         mask_mat = mask_mat.astype(np.float32)
         # 应当是转换成模型的一部分，以作缓存
         self.sample_mask = nn.Parameter(torch.Tensor(mask_mat).view(self.tscale, -1), requires_grad=False)
+
+
 

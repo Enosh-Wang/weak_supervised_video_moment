@@ -84,13 +84,13 @@ def parse_args():
     return args
 
 if __name__ == '__main__':
-    os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+    #os.environ["CUDA_VISIBLE_DEVICES"] = "3"
     opt = parse_args()
     print(opt)
     logging.basicConfig(format='%(asctime)s %(message)s', level=logging.INFO)
 
-    #train_runner = Runner(opt,is_training = True)
-    #train_runner.train()
+    train_runner = Runner(opt,is_training = True)
+    train_runner.train()
     test_runner = Runner(opt, is_training = False)
     test_runner.test(os.path.join(opt.model_path,opt.model_name))
 
