@@ -40,19 +40,19 @@ def Criterion(score,batch_size,negative_num,opt):
     positive_score = score_max[:batch_size]
     negative_score = score_max[batch_size:]
     '''
-    score = video_score(score)
-    positive_score = score[:batch_size]
-    negative_score = score[batch_size:]
+    v_score = video_score(score)
+    positive_score = v_score[:batch_size]
+    negative_score = v_score[batch_size:]
 
     negative_score = negative_score.view(-1,negative_num)
     positive_score = positive_score.unsqueeze(1).expand_as(negative_score)
     global_loss = (opt.global_margin + negative_score - positive_score).clamp(min=0)
     global_loss = global_loss.sum()#/batch_size
-    '''
-    local_loss = torch.zeros(1).cuda()
+
+    local_loss = torch.Tensor([0]).cuda()
     for i in range(batch_size):
         # 展平
-        temp = positive_map[i].view(-1)
+        temp = score[i]
         # 降序排列
         temp = torch.sort(temp,descending=True)[0]
         num = torch.sum(temp > 0.01)
@@ -61,7 +61,7 @@ def Criterion(score,batch_size,negative_num,opt):
         local_loss += (opt.local_margin + torch.mean(temp[num-pos:num]) - torch.mean(temp[:pos])).clamp(min=0)
 
     local_loss = local_loss/batch_size
-    '''
+
     return global_loss#+local_loss
 """
 def Criterion1(positive_map, negative_map,opt):
