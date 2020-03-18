@@ -2,103 +2,139 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from tools.util import cosine_sim
-from torch.nn.utils.rnn import pack_padded_sequence
+from tools.util import LogSumExp, get_mask
+from models.CMIL import get_lambda, get_video_score_nms
+import time
+import random
 
-def video_score1(score_map):
-    num = score_map.size(0)
-    score_map = 1-score_map.view(num,-1)
-    print("score_map:",score_map.shape)
-    print("score_map:",score_map)
-    print("score_prod:",torch.prod(score_map,dim=-1))
-    print("score_prod:",torch.prod(score_map,dim=-1).shape)
-    exit()
-    return 1 - torch.prod(score_map,dim=-1)
+def Criterion1(videos, sentences, opt, writer, iters, is_training, max_iter, mask, match_map):
 
-def video_score2(score_map):
-    num = score_map.size(0)
-    score_map = score_map.view(num,-1)
-    #print("score_map:",score_map.shape)
-    #print("score_map:",score_map)
-    score = torch.max(score_map,dim=-1)[0]
-    #print("score:",score)
-    #print("score:",score.shape)
-    return score
-def video_score(score_map):
-    r = 1
-    score = torch.log(torch.sum(torch.exp(score_map*r),dim=-1))/r
-    return score
-def Criterion(score,batch_size,negative_num,opt):
-    """
-    Compute loss
-    video [b,c,d,t] sentence [b,c]
-    """
-    # score [b,d*t]
-    '''
-    score_max = torch.max(score,dim=-1)[0]
+    # videos[b,c,d,t] sentences[b,c]
+    b,c,d,t = videos.size()
+    postive_map = []
+    score_map = []
+    L1_loss = torch.Tensor([0]).cuda()
+    lam = get_lambda(iters, max_iter, opt.continuation_func)
+
+    for i in range(b):
+        sentence = sentences[i] # [c]
+        sentence = sentence.view(1,c,1,1).repeat(b,1,d,t) # [c] -> [b,c,d,t]
+        score = torch.cosine_similarity(videos, sentence, dim=1).view(b,-1) # [b,1,d,t] -> [b,d*t]
+        if is_training and iters % opt.log_step == 0 and i==0:
+            writer.add_histogram('score',score,iters)
+        score_min = torch.min(score, dim = -1, keepdim = True)[0]
+        score_max = torch.max(score, dim = -1, keepdim = True)[0]
+        score_norm = (score - score_min)/(score_max-score_min)
+        
+        score = score - score_min
+        score = score*score_norm
+        if is_training and iters % opt.log_step == 0 and i==0:
+            writer.add_histogram('score_norm',score,iters)
+        L1_loss += torch.abs(score).sum()
+        score = score.masked_fill(mask == 0, float('-inf'))
+        
+        postive_map.append(score[i].view(d,t)) #[d,t]
+        '''
+        start = time.time()
+        score1 = LogSumExp(score, opt.lambda_lse, dim=-1) # [b,d*t] -> [b]
+        end = time.time()
+        print(end - start)
+
+        start = time.time()
+        score3 = get_video_score(score, lam, opt.temporal_scale, match_map, mask)
+        end = time.time()
+        print(end - start)
+        '''
+        start = time.time()
+        score = get_video_score_nms(score, lam, opt.temporal_scale, match_map)
+        end = time.time()
+        print(end - start)
+        exit()
+        if is_training and iters % opt.log_step == 0 and i==0:
+            writer.add_histogram('score_video',score,iters)
+            
+        score_map.append(score)
+
+    postive_map = torch.stack(postive_map) # [b,d,t]
+    scores = torch.stack(score_map) # [b,b]
+
+    diagonal = scores.diag().view(scores.size(0), 1)
+    d1 = diagonal.expand_as(scores)
+    d2 = diagonal.t().expand_as(scores)
+
+    # compare every diagonal score to scores in its column
+    # caption retrieval
+    cost_s = (opt.global_margin + scores - d1).clamp(min=0)
+    # compare every diagonal score to scores in its row
+    # image retrieval
+    cost_im = (opt.global_margin + scores - d2).clamp(min=0)
+
+    # clear diagonals
+    I = torch.eye(scores.size(0)) > .5
+    if torch.cuda.is_available():
+        I = I.cuda()
+    cost_s = cost_s.masked_fill_(I, 0)
+    cost_im = cost_im.masked_fill_(I, 0)
+
+    # keep the maximum violating negative for each query
+    if opt.max_violation:
+        cost_s = cost_s.max(1)[0]
+        cost_im = cost_im.max(0)[0]
+
+    if is_training and iters % opt.log_step == 0:
+        writer.add_scalar('cost_s',cost_s.sum(),iters)
+        writer.add_scalar('cost_im',cost_im.sum(),iters)
+        writer.add_scalar('L1_loss',L1_loss,iters)
+        writer.add_scalar('lam',lam,iters)
+    return cost_s.sum() + cost_im.sum(), postive_map #+ 0.0001*L1_loss
+
+def sample(videos,sentences,video_name):
     
-    positive_score = score_max[:batch_size]
-    negative_score = score_max[batch_size:]
-    '''
-    v_score = video_score(score)
-    positive_score = v_score[:batch_size]
-    negative_score = v_score[batch_size:]
+        negative_num = 5
+        b,c,d,t = videos.size()
+        real_negative = min(negative_num,b)
+        new_size = b*real_negative
+        new_video = torch.zeros(new_size,c,d,t).cuda()
+        new_sentence = torch.zeros(new_size,c).cuda()
+        
+        for i in range(b):
+            x = list(range(b))
+            x.remove(i)
+            new_sentence[i*real_negative:(i+1)*real_negative] = sentences[i]
+            # 至多重复采用5次，防止采样到与gt相同的视频
+            for j in range(5):
+                y = random.sample(x,real_negative)
+                if video_name[i] not in [video_name[k] for k in y]:
+                    break
+            new_video[i*real_negative:(i+1)*real_negative] = videos[y]
+        return new_sentence,new_video,real_negative
 
-    negative_score = negative_score.view(-1,negative_num)
+def Criterion(videos, sentences, opt, writer, iters, is_training, max_iter, mask, match_map, video_name,valid_num):
+
+    # videos[b,c,d,t] sentences[b,c]
+    neg_sentence, neg_video, neg_num = sample(videos, sentences, video_name)
+    all_video = torch.cat((videos,neg_video),dim=0)
+    all_sentence = torch.cat((sentences,neg_sentence),dim=0)
+    b,c,d,t = all_video.size()
+    all_sentence = all_sentence.view(b,c,1,1).repeat(1,1,d,t)
+    score = torch.cosine_similarity(all_video, all_sentence, dim=1)
+    score = score.masked_fill(mask == 0, float('-inf'))
+
+    lam = get_lambda(iters, max_iter, opt.continuation_func)
+
+    video_score = get_video_score_nms(score.view(b,-1), lam, opt.temporal_scale, match_map, valid_num)
+
+    batch_size = videos.size(0)
+    positive_score = video_score[:batch_size]
+    negative_score = video_score[batch_size:]
+
+    negative_score = negative_score.view(-1,neg_num)
     positive_score = positive_score.unsqueeze(1).expand_as(negative_score)
     global_loss = (opt.global_margin + negative_score - positive_score).clamp(min=0)
-    global_loss = global_loss.sum()#/batch_size
+    global_loss = global_loss.sum()
 
-    local_loss = torch.Tensor([0]).cuda()
-    for i in range(batch_size):
-        # 展平
-        temp = score[i]
-        # 降序排列
-        temp = torch.sort(temp,descending=True)[0]
-        num = torch.sum(temp > 0.01)
-        #pos = int(np.ceil(num*0.1))
-        pos = torch.ceil(num.float()*0.1).int()
-        local_loss += (opt.local_margin + torch.mean(temp[num-pos:num]) - torch.mean(temp[:pos])).clamp(min=0)
-
-    local_loss = local_loss/batch_size
-
-    return global_loss#+local_loss
-"""
-def Criterion1(positive_map, negative_map,opt):
-    mask = get_mask(opt.temporal_scale).unsqueeze(0)
-
-    batch_size= positive_map.size(0)
-    mask = mask.repeat(batch_size,1,1)
-    positive_map = positive_map*mask
-
-    mask = mask.repeat(opt.negative_num,1,1)
-    negative_map = negative_map*mask
-
-    positive_score = video_score(positive_map)
-    negative_score = video_score(negative_map)
-    label = torch.cat((torch.ones(batch_size),torch.zeros(batch_size*opt.negative_num))).cuda()
-    #score = torch.cat((positive_score,negative_score))>0.5
-    #score = score.float()
-    print('score:',torch.cat((positive_score,negative_score)))
-    print('label:',label)
-    global_loss = F.binary_cross_entropy(torch.cat((positive_score,negative_score)),label)
-    '''
-    negative_score = negative_score.view(-1,opt.negative_num)
-    positive_score = positive_score.unsqueeze(1).expand_as(negative_score)
-    global_loss = (opt.global_margin + negative_score - positive_score).clamp(min=0)
-    global_loss = global_loss.sum()#/batch_size
-    '''
-    local_loss = torch.zeros(1).cuda()
-    for i in range(batch_size):
-        # 展平
-        temp = positive_map[i].view(-1)
-        # 降序排列
-        temp = torch.sort(temp,descending=True)[0]
-        num = torch.sum(temp > 0.01)
-        #pos = int(np.ceil(num*0.1))
-        pos = torch.ceil(num.float()*0.1).int()
-        local_loss += (opt.local_margin + torch.mean(temp[num-pos:num]) - torch.mean(temp[:pos])).clamp(min=0)
-
-    local_loss = local_loss/batch_size
-    return global_loss#+local_loss
-"""
+    if is_training and iters % opt.log_step == 0:
+        writer.add_scalar('lam',lam,iters)
+        writer.add_histogram('score',score,iters)
+        writer.add_histogram('video_score',video_score,iters)
+    return global_loss, score[:batch_size] #+ 0.0001*L1_loss

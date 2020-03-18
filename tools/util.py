@@ -1,18 +1,63 @@
 import torch
 import torch.nn as nn
-import torch.nn.init
-import torchvision.models as models
-from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
-
-from torch.nn.utils.clip_grad import clip_grad_norm
 import numpy as np
 from collections import OrderedDict
 import math
-
-from gensim.test.utils import datapath, get_tmpfile
-from gensim.models import KeyedVectors
-from gensim.scripts.glove2word2vec import glove2word2vec
 import pickle
+
+def l1norm(X, dim, eps=1e-8):
+    """L1-normalize columns of X
+    """
+    norm = torch.abs(X).sum(dim=dim, keepdim=True) + eps
+    X = torch.div(X, norm)
+    return X
+
+def l2norm(X, dim, eps=1e-8):
+    """L2-normalize columns of X
+    """
+    norm = torch.pow(X, 2).sum(dim=dim, keepdim=True).sqrt() + eps
+    X = torch.div(X, norm)
+    return X
+
+def LogSumExp(X, lambda_lse, dim):
+    score = torch.log(torch.sum(torch.exp(X*lambda_lse),dim))/lambda_lse
+    return score
+
+def get_mask(tscale):
+
+    bm_mask = []
+    # 遍历每行，逐行计算掩码，逐行在末尾增加0
+    for idx in range(tscale):
+        mask_vector = [1 for i in range(tscale - idx)
+                    ] + [0 for i in range(idx)]
+        bm_mask.append(mask_vector)
+    bm_mask = np.array(bm_mask, dtype=np.int)
+    return torch.IntTensor(bm_mask).cuda()
+
+def get_mask_spare(tscale):
+         
+    bm_mask = []
+    # 遍历每行，逐行计算掩码，逐行在末尾增加0
+    for duration in range(1, tscale+1):
+        mask_vector = []
+        k = np.ceil(np.log2(duration/6))
+        s = 2**(k-1)
+        if k == 1:
+            s2 = 0
+        else:
+            s2 = 2**(k+2)-1
+
+        for start in range(tscale-duration+1):
+
+            if np.mod(start,s) == 0 and np.mod(start+duration-s2,s) == 0:
+                mask_vector.append(1)
+            else:
+                mask_vector.append(0)
+                
+        mask_vector += [0 for i in range(duration-1)]
+        bm_mask.append(mask_vector)
+    bm_mask = np.array(bm_mask, dtype=np.int)
+    return torch.IntTensor(bm_mask).cuda()
 
 def load_glove(glove_path):
     with open(glove_path, 'rb') as f:
@@ -28,30 +73,6 @@ def multihead_mask(x, lengths):
     key_padding_mask = key_padding_mask.cuda()
     return key_padding_mask
 
-def l2norm(X):
-    """L2-normalize columns of X
-    """
-    norm = torch.pow(X, 2).sum(dim=1).sqrt()
-    X = X / norm[:,None]
-    return X
-
-
-def cosine_similarity(x1, x2):
-    """Returns cosine similarity based attention between x1 and x2, computed along dim."""
-    # 原始代码
-    # batch 矩阵相乘 x1[128,26,1024] x2[128,1024] w1[128,26,1]
-    # w1=torch.bmm(x1, x2.unsqueeze(2))
-    # <!-改为MIL
-
-    batch_size = x1.size()[0]
-    x2 = x2.repeat(batch_size,1,1) # [128,128,1024]
-    x1 = x1.permute(0,2,1) # [128,1024,14]
-    w1 = torch.bmm(x2,x1) # [128,128,14]
-
-    #x2 = x2.permute(0,2,1)
-    #w1 = torch.bmm(x1,x2)
-    return w1
-
 class PositionalEncoding(nn.Module):
     """Inject some information about the relative or absolute position of the tokens
         in the sequence. The positional encodings have the same dimension as
@@ -65,7 +86,7 @@ class PositionalEncoding(nn.Module):
         pos_encoder = PositionalEncoding(d_model)
     """
 
-    def __init__(self, d_model, dropout=0.1, max_len=5000):
+    def __init__(self, d_model, dropout=0., max_len=5000):
         super(PositionalEncoding, self).__init__()
         self.dropout = nn.Dropout(p=dropout)
 
@@ -90,12 +111,6 @@ class PositionalEncoding(nn.Module):
 
         x = x + self.pe[:x.size(0), :]
         return self.dropout(x)
-
-def cosine_sim(im, s):
-    """Cosine similarity between all the image and sentence pairs
-    """
-    # 标准的矩阵乘法 结果[滑窗个数，单词个数]
-    return im.mm(s.t())
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
@@ -259,3 +274,4 @@ def t2i( df, filename, is_training):
 	
 	
     return R1IOU03, R1IOU05, R1IOU07
+

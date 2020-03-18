@@ -5,9 +5,9 @@ import matplotlib
 matplotlib.use('agg')
 import matplotlib.pyplot as plt
 
-def plot_map(score_maps, index, tscale):
+def plot_map(score_maps, index, model_name):
     # 可视化保存路径
-    path = os.path.join('img','map')
+    path = os.path.join('img',model_name)
     if not os.path.exists(path):
         os.makedirs(path)
     

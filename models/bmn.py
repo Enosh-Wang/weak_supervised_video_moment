@@ -3,30 +3,7 @@ import math
 import numpy as np
 import torch
 import torch.nn as nn
-
-class Classifier(nn.Module):
-    def __init__(self, opt):
-        super(Classifier, self).__init__()
-        self.opt = opt
-        
-        self.hidden_dim_2d = 128
-        self.x_2d_p = nn.Sequential(
-            nn.Conv2d(self.opt.joint_dim, self.hidden_dim_2d, kernel_size=1),
-            nn.BatchNorm2d(self.hidden_dim_2d),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(self.hidden_dim_2d, self.hidden_dim_2d, kernel_size=3, padding=1),
-            nn.BatchNorm2d(self.hidden_dim_2d),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(self.hidden_dim_2d, self.hidden_dim_2d, kernel_size=3, padding=1),
-            nn.BatchNorm2d(self.hidden_dim_2d),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(self.hidden_dim_2d, 1, kernel_size=1),
-            nn.Sigmoid()
-        )
-
-    def forward(self, x):
-        score = self.x_2d_p(x)
-        return score
+from tools.util import l2norm
 
 class BMN(nn.Module):
     def __init__(self, opt):
@@ -39,33 +16,49 @@ class BMN(nn.Module):
 
         self._get_interp1d_mask()
 
+        self.hidden_dim_1d = 256
+        self.hidden_dim_2d = 256
+        self.hidden_dim_3d = 512
+
         # Proposal Evaluation Module
         self.x_1d_p = nn.Sequential(
-            nn.Conv1d(self.opt.joint_dim, self.opt.joint_dim, kernel_size=3, padding=1),
-            nn.BatchNorm1d(self.opt.joint_dim),
+            nn.Conv1d(self.opt.joint_dim, self.hidden_dim_1d, kernel_size=3, padding=1),
+            nn.BatchNorm1d(self.hidden_dim_1d),
             nn.ReLU(inplace=True)
         )
         self.x_3d_p = nn.Sequential(
-            nn.Conv3d(self.opt.joint_dim, self.opt.joint_dim, kernel_size=(self.num_sample, 1, 1)),
-            nn.BatchNorm3d(self.opt.joint_dim),
+            nn.Conv3d(self.hidden_dim_1d, self.hidden_dim_3d, kernel_size=(self.num_sample, 1, 1),stride=(self.num_sample, 1, 1)),
+            nn.BatchNorm3d(self.hidden_dim_3d),
             nn.ReLU(inplace=True)
         )
 
+        self.x_2d_p = nn.Sequential(
+            nn.Conv2d(self.hidden_dim_3d, self.hidden_dim_2d, kernel_size=1), 
+            nn.BatchNorm2d(self.hidden_dim_2d),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(self.hidden_dim_2d, self.opt.joint_dim, kernel_size=1), 
+            nn.BatchNorm2d(self.opt.joint_dim),
+            nn.Tanh()
+        )
+
+        
+
     def forward(self, video): #, sentence):
-        # 转换维度，维度在前，帧数在后 [n,c,l]
+        # 转换维度，维度在前，帧数在后 [b,c,t]
         video = video.transpose(1,2)
         # 一层时序卷积
         confidence_map = self.x_1d_p(video)
         # 置信度图
         confidence_map = self._boundary_matching_layer(confidence_map)
-        # [128,512,d,t]
-        confidence_map = self.x_3d_p(confidence_map).squeeze(2)
-
+        confidence_map = self.x_3d_p(confidence_map).squeeze(2) # -> [b,c,d,t]
+        confidence_map = self.x_2d_p(confidence_map) # -> [b,c,d,t]
+        
+        confidence_map = l2norm(confidence_map,dim=1)
         return confidence_map
 
     def _boundary_matching_layer(self, x):
         input_size = x.size()
-        # C,N,D,T
+        # out [b,c,n,d,t]
         out = torch.matmul(x, self.sample_mask).reshape(input_size[0],input_size[1],self.num_sample,self.tscale,self.tscale)
         return out
     # 输入：sample_xmin, sample_xmax, self.tscale, self.num_sample,self.num_sample_perbin
@@ -128,12 +121,12 @@ class BMN(nn.Module):
                         self.num_sample_perbin)
                 else:
                     p_mask = np.zeros([self.tscale, self.num_sample])
-                # p_mask[n,t]矩阵
+                # p_mask[t,n]矩阵
                 mask_mat_vector.append(p_mask)
-            # mask_mat_vetor[n,t,d]
+            # mask_mat_vetor[t,n,d]
             mask_mat_vector = np.stack(mask_mat_vector, axis=2)
             mask_mat.append(mask_mat_vector)
-        # mask_mat_vetor[n,t,d,t]
+        # mask_mat_vetor[t,n,d,t]
         mask_mat = np.stack(mask_mat, axis=3)
         mask_mat = mask_mat.astype(np.float32)
         # 应当是转换成模型的一部分，以作缓存

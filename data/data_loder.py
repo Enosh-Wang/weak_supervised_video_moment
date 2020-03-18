@@ -51,7 +51,7 @@ def collate_fn(data):
         end = sentence_lengths[i]
         sentence_padded[i, :end] = sentence[:end]
     # 依次是一个batch的视频、padding后的文本，文本的单词数目，视频的滑窗数目，pair的序号
-    return video_padded, sentence_padded, sentence_lengths, video_lengths, index ,video_name
+    return video_padded, sentence_padded, sentence_lengths, index ,video_name
 
 def get_data_loader_GCN(opt, word2vec, data_split, shuffle=True):
     """Returns torch.utils.data.DataLoader for  dataset."""

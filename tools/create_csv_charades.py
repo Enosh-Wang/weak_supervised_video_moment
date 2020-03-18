@@ -32,13 +32,15 @@ def save_csv(name,data,video_dict):
     df.to_csv(name,index=False)
 
 
-with open("caption/charades_sta_train.txt") as f:
+with open("/home/share/wangyunxiao/Charades/caption/charades_sta_train.txt") as f:
     trainval_txt = f.readlines()
-with open("caption/charades_sta_test.txt") as f:
+with open("/home/share/wangyunxiao/Charades/caption/charades_sta_test.txt") as f:
     test_txt = f.readlines()
 
 num = len(trainval_txt)
 train_num = math.floor(num*0.8)
+random.shuffle(trainval_txt)
+random.shuffle(test_txt)
 train_list = trainval_txt[:train_num]
 val_list = trainval_txt[train_num:]
 
@@ -49,9 +51,9 @@ video_length = list(train_df['length'])+list(test_df['length'])
 
 video_dict = dict(zip(video_name,video_length))
 # 解析字段，并保存为csv
-save_csv('charades_train.csv',train_list,video_dict)
-save_csv('charades_val.csv',val_list,video_dict)
-save_csv('charades_test.csv',test_txt,video_dict)
+save_csv('/home/share/wangyunxiao/Charades/caption/charades_train.csv',train_list,video_dict)
+save_csv('/home/share/wangyunxiao/Charades/caption/charades_val.csv',val_list,video_dict)
+save_csv('/home/share/wangyunxiao/Charades/caption/charades_test.csv',test_txt,video_dict)
 
 
 

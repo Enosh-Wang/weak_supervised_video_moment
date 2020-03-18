@@ -14,7 +14,6 @@ from tools.plot import plot_similarity,plot_pca,plot_sentence,plot_video,plot_ma
 from tools.vocab import Vocabulary
 from tools.post_processing import post_processing
 import pickle
-from tools.bad_grad_viz import register_hooks
 
 class Runner(object):
 
@@ -30,7 +29,7 @@ class Runner(object):
             self.model = self.model.cuda()
             cudnn.benchmark = True
 
-        self.optimizer = torch.optim.Adam(list(self.model.parameters()), lr=opt.learning_rate)
+        self.optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, self.model.parameters()), lr=opt.learning_rate,weight_decay=opt.weight_decay)
         self.logger = SummaryWriter(os.path.join(opt.model_path,opt.model_name), flush_secs=5)
         self.iters = 0
         self.start_epoch = 0
@@ -42,8 +41,8 @@ class Runner(object):
         # Load data loaders
         # 加载数据集
         train_loader = get_data_loader(self.opt, self.word2vec, 'train', True)
-        val_loader = get_data_loader(self.opt, self.word2vec, 'val', False)
-
+        val_loader = get_data_loader(self.opt, self.word2vec, 'val', True)
+        max_iter = len(train_loader)*self.opt.num_epochs
         # optionally resume from a checkpoint
         if self.opt.resume:
             self.load_model()
@@ -53,10 +52,10 @@ class Runner(object):
             # 重载学习速率，每 30 epoch 除以10，根据重载的epoch数计算当前的学习速率
             self.adjust_learning_rate(epoch)
             # train for one epoch
-            self.train_one_epoch(train_loader, epoch)
+            self.train_one_epoch(train_loader, epoch, max_iter)
 
             # evaluate on validation set
-            val_loss = self.validate(val_loader)
+            val_loss = self.validate(val_loader, max_iter)
 
             # remember best R@ sum and save checkpoint
             is_best = val_loss < self.min_loss
@@ -69,7 +68,7 @@ class Runner(object):
                 'iters': self.iters,
             }, is_best, prefix=os.path.join(self.opt.model_path,self.opt.model_name))
     
-    def validate(self, val_loader):
+    def validate(self, val_loader, max_iter):
 
         # switch to evaluate mode
         self.model.eval()
@@ -78,13 +77,13 @@ class Runner(object):
         batch_time = AverageMeter()
         end = time.time()
         
-        for iters, (videos, sentences, sentence_lengths, video_lengths, index, video_name) in enumerate(val_loader):
+        for iters, (videos, sentences, sentence_lengths, index, video_name) in enumerate(val_loader):
             if torch.cuda.is_available():
                 videos = videos.cuda()
                 sentences = sentences.cuda()
             # compute the embeddings
             with torch.no_grad():
-                _,loss = self.model.forward(videos, sentences, sentence_lengths, video_lengths, video_name, is_training=True)
+                _,loss = self.model.forward(videos, sentences, sentence_lengths, video_name, self.logger, self.iters, max_iter)
 
             # measure elapsed time
             batch_time.update(time.time() - end)
@@ -101,7 +100,7 @@ class Runner(object):
         self.logger.add_scalar('val/loss', val_loss, global_step=self.iters)
         return val_loss
     
-    def train_one_epoch(self, train_loader, epoch):
+    def train_one_epoch(self, train_loader, epoch, max_iter):
         batch_time = AverageMeter()
         data_time = AverageMeter()
 
@@ -109,7 +108,7 @@ class Runner(object):
         self.model.train()
 
         end = time.time()
-        for i, (videos, sentences, sentence_lengths, video_lengths, index, video_name) in enumerate(train_loader):
+        for i, (videos, sentences, sentence_lengths, index, video_name) in enumerate(train_loader):
             # measure data loading time
             data_time.update(time.time() - end)
             self.iters += 1
@@ -119,14 +118,14 @@ class Runner(object):
                 videos = videos.cuda()
                 sentences = sentences.cuda()
 
-            _,loss = self.model.forward(videos, sentences, sentence_lengths, video_lengths, video_name, is_training=True)
+            _,loss = self.model.forward(videos, sentences, sentence_lengths, video_name, self.logger, self.iters, max_iter)
  
             self.optimizer.zero_grad()
             # compute gradient and do SGD step
             loss.backward()
             if self.grad_clip > 0:
                 # 正则化
-                torch.nn.utils.clip_grad.clip_grad_norm_(self.model.parameters(), self.grad_clip)
+                torch.nn.utils.clip_grad.clip_grad_norm_(filter(lambda p: p.requires_grad, self.model.parameters()), self.grad_clip)
             self.optimizer.step()
 
             # measure elapsed time
@@ -142,11 +141,14 @@ class Runner(object):
                     .format(
                         epoch, i, len(train_loader), batch_time=batch_time,
                         data_time=data_time))
+                self.logger.add_histogram('videos', videos, global_step=self.iters)
+                self.logger.add_histogram('sentences', sentences, global_step=self.iters)
 
             # Record logs in tensorboard
             self.logger.add_scalar('epoch', epoch, global_step=self.iters)
             self.logger.add_scalar('loss', loss, global_step=self.iters)
             self.logger.add_scalar('lr', self.optimizer.param_groups[0]['lr'], global_step=self.iters)
+            
 
 
     def get_df(self):
@@ -194,7 +196,7 @@ class Runner(object):
         if is_best:
             shutil.copyfile(path, os.path.join(prefix,'model_best.pth.tar'))
 
-    def test(self,model_path):
+    def test(self, model_path, max_iter):
         # optionally resume from a checkpoint
         checkpoint = torch.load(os.path.join(model_path,'checkpoint.pth.tar'))
         opt = checkpoint['opt']
@@ -209,16 +211,16 @@ class Runner(object):
         batch_time = AverageMeter()
         end = time.time()
         all_result = {}
-        for iters, (videos, sentences, sentence_lengths, video_lengths, index, video_name) in enumerate(test_loader):
+        for iters, (videos, sentences, sentence_lengths, index, video_name) in enumerate(test_loader):
             if torch.cuda.is_available():
                 videos = videos.cuda()
                 sentences = sentences.cuda()
             # compute the embeddings
             with torch.no_grad():
-                confidence_map,loss = self.model.forward(videos, sentences, sentence_lengths, video_lengths, video_name, is_training=False)
+                confidence_map,loss = self.model.forward(videos, sentences, sentence_lengths, video_name, self.logger, self.iters, max_iter)
 
             confidence_map = confidence_map.detach().cpu().numpy()
-            plot_map(confidence_map,index,self.opt.temporal_scale)
+            plot_map(confidence_map,index,self.opt.model_name)
             batch_result = self.generate_proposal(confidence_map, index)
             
             all_result.update(batch_result)
@@ -267,6 +269,15 @@ class Runner(object):
             results = np.stack(results)
             batch_result[index[i]] = results
         return batch_result
+
+    def l2_Regular(self): 
+        l2_reg = torch.tensor(0.).cuda()
+        for name, param in self.model.named_parameters():
+            if 'weight' in name and param.requires_grad == True:
+                l2_reg += torch.norm(param) 
+        return l2_reg * self.opt.weight_decay
+    
+    
         
 
 

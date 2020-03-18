@@ -3,7 +3,6 @@ import torch
 from torch import nn
 from torch.nn.utils.rnn import pack_padded_sequence
 from tools.beam_search import CaptionGenerator
-import time
 
 
 class VideoCaption(nn.Module):
