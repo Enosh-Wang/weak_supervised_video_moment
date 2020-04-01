@@ -1,12 +1,12 @@
 import torch
 import torch.nn as nn
 import numpy as np
-
+from tools.util import l1norm,l2norm,get_mask
 
 def func_attention(query, context, opt, smooth, eps=1e-8):
     """
-    query: (n_context, queryL, d)
-    context: (n_context, sourceL, d)
+    query: [b,l,c]
+    context: [b,d*t,c]
     """
     batch_size_q, queryL = query.size(0), query.size(1)
     batch_size, sourceL = context.size(0), context.size(1)
@@ -62,14 +62,14 @@ def func_attention(query, context, opt, smooth, eps=1e-8):
     weightedContext = torch.transpose(weightedContext, 1, 2)
 
     return weightedContext, attnT
-
-def xattn_score_t2i(images, captions, cap_lens, opt):
+'''
+def xattn_score_t2i1(images, captions, cap_lens, opt):
 
     # [b,c,d,t] [b,l,c]
     similarities = []
     # 图片数目，即batch_size
     n_image, n_channel, d, t = images.size()
-    images = images.permute(0,2,3,1).view(n_image, -1, n_channel)
+    images = images.permute(0,2,3,1).view(n_image, -1, n_channel) # ->[b,d,t,c]->[b,d*t,c]
     # 句子数目
     n_caption = captions.size(0)
     postive_attn = []
@@ -119,5 +119,48 @@ def xattn_score_t2i(images, captions, cap_lens, opt):
     similarities = torch.cat(similarities, 1)
     
     return similarities, postive_attn
+'''
+def xattn_score_t2i(images, captions, cap_lens, opt):
 
+    # [b,c,d,t] [b,l,c]
+    # 图片数目，即batch_size
+    n_image, n_channel, d, t = images.size()
+    images = images.permute(0,2,3,1).view(n_image, -1, n_channel) # ->[b,d,t,c]->[b,d*t,c]
+    
+    # captions [b,l,c] images[b,d*t,c] attn [b,d*t,l]
+    weiContext, attn = func_attention(captions, images, opt, smooth=opt.lambda_softmax)
 
+    batch_size, seq_size, _ = captions.size()
+    key_padding_mask = torch.BoolTensor(batch_size,seq_size)
+    for i in range(batch_size):
+        key_padding_mask[i,:cap_lens[i]] = False
+        key_padding_mask[i,cap_lens[i]:] = True
+    key_padding_mask = key_padding_mask.unsqueeze(1).cuda()
+    
+
+    
+    if opt.agg_func == 'LogSumExp':
+        row_sim = attn.masked_fill(key_padding_mask == True, float('-inf'))
+        row_sim.mul_(opt.lambda_lse).exp_()
+        row_sim = row_sim.sum(dim=2, keepdim=True)
+        row_sim = torch.log(row_sim)/opt.lambda_lse
+    elif opt.agg_func == 'Max':
+        row_sim = attn.masked_fill(key_padding_mask == True, 0)
+        row_sim = row_sim.max(dim=2, keepdim=True)[0]
+    elif opt.agg_func == 'Sum':
+        row_sim = attn.masked_fill(key_padding_mask == True, 0)
+        row_sim = row_sim.sum(dim=2, keepdim=True)
+    elif opt.agg_func == 'Mean':
+        row_sim = attn.masked_fill(key_padding_mask == True, 0)
+        row_sim = row_sim.mean(dim=2, keepdim=True)
+    else:
+        raise ValueError("unknown aggfunc: {}".format(opt.agg_func))
+    
+    #row_sim [b,d*t,1] images [b,d*t,c]
+    #images = images + images*row_sim
+
+    #images = images.permute(0,2,1).view(n_image, n_channel, d, t)
+
+    row_sim = row_sim.permute(0,2,1).view(n_image, d, t)
+    # weiContext [b,l,c]
+    return weiContext,row_sim

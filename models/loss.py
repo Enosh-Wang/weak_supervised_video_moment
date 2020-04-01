@@ -6,7 +6,7 @@ from tools.util import LogSumExp, get_mask
 from models.CMIL import get_lambda, get_video_score_nms
 import time
 import random
-
+from torch.nn.utils.rnn import pack_padded_sequence
 def Criterion1(videos, sentences, opt, writer, iters, is_training, max_iter, mask, match_map):
 
     # videos[b,c,d,t] sentences[b,c]
@@ -88,7 +88,7 @@ def Criterion1(videos, sentences, opt, writer, iters, is_training, max_iter, mas
         writer.add_scalar('lam',lam,iters)
     return cost_s.sum() + cost_im.sum(), postive_map #+ 0.0001*L1_loss
 
-def sample(videos,sentences,video_name):
+def sample1(videos,sentences,video_name):
     
         negative_num = 5
         b,c,d,t = videos.size()
@@ -108,21 +108,44 @@ def sample(videos,sentences,video_name):
                     break
             new_video[i*real_negative:(i+1)*real_negative] = videos[y]
         return new_sentence,new_video,real_negative
-
-def Criterion(videos, sentences, opt, writer, iters, is_training, max_iter, mask, match_map, video_name,valid_num):
+def sample(videos,sentences,video_name):
+    
+        negative_num = 5
+        b,c = videos.size()
+        real_negative = min(negative_num,b)
+        new_size = b*real_negative
+        new_video = torch.zeros(new_size,c).cuda()
+        new_sentence = torch.zeros(new_size,c).cuda()
+        
+        for i in range(b):
+            x = list(range(b))
+            x.remove(i)
+            new_sentence[i*real_negative:(i+1)*real_negative] = sentences[i]
+            # 至多重复采用5次，防止采样到与gt相同的视频
+            for j in range(5):
+                y = random.sample(x,real_negative)
+                if video_name[i] not in [video_name[k] for k in y]:
+                    break
+            new_video[i*real_negative:(i+1)*real_negative] = videos[y]
+        return new_sentence,new_video,real_negative
+def Criterion2(videos, sentences, attn, opt, writer, iters, is_training, max_iter, mask, match_map, video_name,valid_num):
 
     # videos[b,c,d,t] sentences[b,c]
+    b,c,d,t = videos.size()
+    videos = videos.view(b,c,-1)
+    videos = torch.sum(videos,dim=-1)
+
     neg_sentence, neg_video, neg_num = sample(videos, sentences, video_name)
     all_video = torch.cat((videos,neg_video),dim=0)
     all_sentence = torch.cat((sentences,neg_sentence),dim=0)
-    b,c,d,t = all_video.size()
-    all_sentence = all_sentence.view(b,c,1,1).repeat(1,1,d,t)
-    score = torch.cosine_similarity(all_video, all_sentence, dim=1)
-    score = score.masked_fill(mask == 0, float('-inf'))
+    
+    #all_sentence = all_sentence.view(b,c,1,1).repeat(1,1,d,t)
+    video_score = torch.cosine_similarity(all_video, all_sentence, dim=1)
+    #score = score.masked_fill(mask == 0, float('-inf'))
 
-    lam = get_lambda(iters, max_iter, opt.continuation_func)
+    #lam = get_lambda(iters, max_iter, opt.continuation_func)
 
-    video_score = get_video_score_nms(score.view(b,-1), lam, opt.temporal_scale, match_map, valid_num)
+    #video_score = get_video_score_nms(score.view(b,-1), lam, opt.temporal_scale, match_map, valid_num)
 
     batch_size = videos.size(0)
     positive_score = video_score[:batch_size]
@@ -133,8 +156,15 @@ def Criterion(videos, sentences, opt, writer, iters, is_training, max_iter, mask
     global_loss = (opt.global_margin + negative_score - positive_score).clamp(min=0)
     global_loss = global_loss.sum()
 
-    if is_training and iters % opt.log_step == 0:
-        writer.add_scalar('lam',lam,iters)
-        writer.add_histogram('score',score,iters)
-        writer.add_histogram('video_score',video_score,iters)
-    return global_loss, score[:batch_size] #+ 0.0001*L1_loss
+    #if is_training and iters % opt.log_step == 0:
+        #writer.add_scalar('lam',lam,iters)
+        #writer.add_histogram('score',score,iters)
+        #writer.add_histogram('video_score',video_score,iters)
+    return global_loss, attn#score[:batch_size] #+ 0.0001*L1_loss
+
+def Criterion(pred, word_id, sentence_lengths):
+    word_id = word_id.transpose(0,1).cuda()
+    target_captions = pack_padded_sequence(word_id,sentence_lengths)[0]
+    caption_loss = F.cross_entropy(pred,target_captions)
+
+    return caption_loss

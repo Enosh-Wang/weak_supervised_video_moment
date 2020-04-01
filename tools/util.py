@@ -273,5 +273,4 @@ def t2i( df, filename, is_training):
         print("R@10 IoU0.7: %f" %(R10IOU7/float(total_length)))
 	
 	
-    return R1IOU03, R1IOU05, R1IOU07
-
+    return R1IOU03/float(total_length), R1IOU05/float(total_length), R1IOU07/float(total_length)

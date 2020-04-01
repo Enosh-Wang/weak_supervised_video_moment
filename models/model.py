@@ -12,12 +12,14 @@ from models.bilinear import Bilinear
 import numpy as np
 from tools.util import get_mask, get_mask_spare
 from tools.plot_gt_map import get_match_map
+from models.cross import xattn_score_t2i
 
 class Model(nn.Module):
 
-    def __init__(self, opt):
+    def __init__(self, opt, vocab):
         super().__init__()
         self.opt = opt
+        self.vocab = vocab
         self.video_encoder = VideoEncoder(opt)
         #self.text_encoder = TextEncoderMulti(opt)
         self.GRU = TextEncoderGRU(opt)
@@ -27,44 +29,26 @@ class Model(nn.Module):
         self.valid_num = torch.sum(self.mask)
         self.match_map = get_match_map(opt.temporal_scale)
         #self.bilinear = Bilinear(opt.joint_dim,opt.joint_dim,opt.joint_dim)
+        self.caption = VideoCaption(opt,vocab)
 
-    def forward(self, videos, sentences, sentence_lengths, video_name, writer, iters, max_iter):
+    def forward(self, videos, sentences, sentence_lengths, video_name, word_id, writer, iters, max_iter):
 
-        sentence_embedding = self.GRU(sentences,sentence_lengths) # -> [b,l,c]
-        video_embedding = self.video_encoder(videos) # -> [b,l,c]
+        global_sentences, sentence_embedding = self.GRU(sentences,sentence_lengths) # -> [b,c]
+        #video_embedding = self.video_encoder(videos) # -> [b,l,c]
 
-        video_embedding_bmn = self.bmn(video_embedding) # -> [b,c,d,t]
+        video_embedding_bmn,attn = self.bmn(videos,global_sentences,self.mask) # -> [b,c,d,t]
+        #video_embedding_bmn,attn = xattn_score_t2i(video_embedding_bmn,sentence_embedding,sentence_lengths,self.opt)
+        pred = self.caption(video_embedding_bmn, sentence_embedding, sentence_lengths)
 
-        loss, postive = Criterion(video_embedding_bmn,sentence_embedding,self.opt,writer,iters,self.training,max_iter,self.mask,self.match_map,video_name,self.valid_num)
+        loss = Criterion(pred,word_id,sentence_lengths)
+        #loss, postive = Criterion(video_embedding_bmn,global_sentences,attn,self.opt,writer,iters,self.training,max_iter,self.mask,self.match_map,video_name,self.valid_num)
         
         if self.training and iters % self.opt.log_step == 0:
             writer.add_histogram('sentence_embedding',sentence_embedding,iters)
-            writer.add_histogram('video_embedding',video_embedding,iters)
+            #writer.add_histogram('video_embedding',video_embedding,iters)
             writer.add_histogram('video_embedding_bmn',video_embedding_bmn,iters)
-            # writer.add_histogram('bmn/x_3d_p/bias',self.bmn.x_3d_p._modules['0'].bias,iters)
-            # writer.add_histogram('bmn/x_3d_p/weight',self.bmn.x_3d_p._modules['0'].weight,iters)
-            # writer.add_histogram('bmn/x_3d_p/norm_bias',self.bmn.x_3d_p._modules['1'].bias,iters)
-            # writer.add_histogram('bmn/x_3d_p/norm_weight',self.bmn.x_3d_p._modules['1'].weight,iters)
-            # writer.add_histogram('bmn/x_1d_p/bias',self.bmn.x_1d_p._modules['0'].bias,iters)
-            # writer.add_histogram('bmn/x_1d_p/weight',self.bmn.x_1d_p._modules['0'].weight,iters)
-            # writer.add_histogram('bmn/x_1d_p/norm_bias',self.bmn.x_1d_p._modules['1'].bias,iters)
-            # writer.add_histogram('bmn/x_1d_p/norm_weight',self.bmn.x_1d_p._modules['1'].weight,iters)
-            # writer.add_histogram('GRU/weight_ih_l0',self.GRU.rnn.weight_ih_l0,iters)
-            # writer.add_histogram('GRU/weight_hh_l0',self.GRU.rnn.weight_hh_l0,iters)
-            # writer.add_histogram('GRU/bias_ih_l0',self.GRU.rnn.bias_ih_l0,iters)
-            # writer.add_histogram('GRU/bias_hh_l0',self.GRU.rnn.bias_hh_l0,iters)
-            # writer.add_histogram('video_encoder/fc1/bias',self.video_encoder.fc1.bias,iters)
-            # writer.add_histogram('video_encoder/fc1/weight',self.video_encoder.fc1.weight,iters)
-            # if self.bmn.x_3d_p._modules['0'].weight.grad is not None:
-            #     writer.add_histogram('bmn/x_3d_p/weight_grad',self.bmn.x_3d_p._modules['0'].weight.grad,iters)
-            #     writer.add_histogram('bmn/x_3d_p/norm_weight_grad',self.bmn.x_3d_p._modules['1'].weight.grad,iters)
-            #     writer.add_histogram('bmn/x_1d_p/weight_grad',self.bmn.x_1d_p._modules['0'].weight.grad,iters)
-            #     writer.add_histogram('bmn/x_1d_p/norm_weight_grad',self.bmn.x_1d_p._modules['1'].weight.grad,iters)
-            #     writer.add_histogram('GRU/weight_ih_l0_grad',self.GRU.rnn.weight_ih_l0.grad,iters)
-            #     writer.add_histogram('GRU/weight_hh_l0_grad',self.GRU.rnn.weight_hh_l0.grad,iters)
-            #     writer.add_histogram('video_encoder/fc1/weight_grad',self.video_encoder.fc1.weight.grad,iters)
         
-        return postive, loss
+        return attn, loss
 
             
 

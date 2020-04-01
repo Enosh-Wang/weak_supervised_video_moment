@@ -22,8 +22,9 @@ class Runner(object):
         self.opt = opt
         self.is_training = is_training
         self.word2vec = load_glove(opt.glove_path)
+        self.vocab = self.get_vocab()
         self.grad_clip = opt.grad_clip
-        self.model = Model(opt)
+        self.model = Model(opt,self.vocab)
 
         if torch.cuda.is_available():
             self.model = self.model.cuda()
@@ -40,8 +41,8 @@ class Runner(object):
 
         # Load data loaders
         # 加载数据集
-        train_loader = get_data_loader(self.opt, self.word2vec, 'train', True)
-        val_loader = get_data_loader(self.opt, self.word2vec, 'val', True)
+        train_loader = get_data_loader(self.opt, self.word2vec, self.vocab, 'train', True)
+        val_loader = get_data_loader(self.opt, self.word2vec, self.vocab, 'val', True)
         max_iter = len(train_loader)*self.opt.num_epochs
         # optionally resume from a checkpoint
         if self.opt.resume:
@@ -76,14 +77,20 @@ class Runner(object):
 
         batch_time = AverageMeter()
         end = time.time()
-        
-        for iters, (videos, sentences, sentence_lengths, index, video_name) in enumerate(val_loader):
+        all_result = {}
+        for iters, (videos, sentences, sentence_lengths, index, video_name, word_id) in enumerate(val_loader):
             if torch.cuda.is_available():
                 videos = videos.cuda()
                 sentences = sentences.cuda()
             # compute the embeddings
             with torch.no_grad():
-                _,loss = self.model.forward(videos, sentences, sentence_lengths, video_name, self.logger, self.iters, max_iter)
+                confidence_map,loss = self.model.forward(videos, sentences, sentence_lengths, video_name, word_id, self.logger, self.iters, max_iter)
+            
+            confidence_map = confidence_map.detach().cpu().numpy()
+            #plot_map(confidence_map,index,self.opt.model_name)
+            batch_result = self.generate_proposal(confidence_map, index)
+            
+            all_result.update(batch_result)
 
             # measure elapsed time
             batch_time.update(time.time() - end)
@@ -98,6 +105,22 @@ class Runner(object):
 
         val_loss = val_loss/len(val_loader)
         self.logger.add_scalar('val/loss', val_loss, global_step=self.iters)
+
+        # 保存路径
+        path = os.path.join("./output/")
+        if not os.path.exists(path):
+            os.makedirs(path)
+        filename = os.path.join(path,self.opt.model_name+'.pkl')
+        with open(filename,'wb') as f:
+            pickle.dump(all_result,f)
+
+        top10_filename = post_processing(filename,self.opt)
+        R1IOU03, R1IOU05, R1IOU07 = t2i(self.dataframe, top10_filename, is_training=False)
+        self.logger.add_scalar('val/R1IOU03', R1IOU03, global_step=self.iters)
+        self.logger.add_scalar('val/R1IOU05', R1IOU05, global_step=self.iters)
+        self.logger.add_scalar('val/R1IOU07', R1IOU07, global_step=self.iters)
+        self.logger.add_scalar('val/R1SUM', R1IOU03+R1IOU05+R1IOU07, global_step=self.iters)
+
         return val_loss
     
     def train_one_epoch(self, train_loader, epoch, max_iter):
@@ -108,7 +131,7 @@ class Runner(object):
         self.model.train()
 
         end = time.time()
-        for i, (videos, sentences, sentence_lengths, index, video_name) in enumerate(train_loader):
+        for i, (videos, sentences, sentence_lengths, index, video_name, word_id) in enumerate(train_loader):
             # measure data loading time
             data_time.update(time.time() - end)
             self.iters += 1
@@ -118,7 +141,7 @@ class Runner(object):
                 videos = videos.cuda()
                 sentences = sentences.cuda()
 
-            _,loss = self.model.forward(videos, sentences, sentence_lengths, video_name, self.logger, self.iters, max_iter)
+            _,loss = self.model.forward(videos, sentences, sentence_lengths, video_name, word_id, self.logger, self.iters, max_iter)
  
             self.optimizer.zero_grad()
             # compute gradient and do SGD step
@@ -196,13 +219,13 @@ class Runner(object):
         if is_best:
             shutil.copyfile(path, os.path.join(prefix,'model_best.pth.tar'))
 
-    def test(self, model_path, max_iter):
+    def test(self, model_path, max_iter=5700):
         # optionally resume from a checkpoint
         checkpoint = torch.load(os.path.join(model_path,'checkpoint.pth.tar'))
         opt = checkpoint['opt']
         print(opt)
         print('Loading dataset')
-        test_loader = get_data_loader(self.opt, self.word2vec, 'test', False)
+        test_loader = get_data_loader(self.opt, self.word2vec, self.vocab, 'test', False)
         self.model.load_state_dict(checkpoint['model'])
         print('Computing results...')
 
@@ -211,13 +234,13 @@ class Runner(object):
         batch_time = AverageMeter()
         end = time.time()
         all_result = {}
-        for iters, (videos, sentences, sentence_lengths, index, video_name) in enumerate(test_loader):
+        for iters, (videos, sentences, sentence_lengths, index, video_name, word_id) in enumerate(test_loader):
             if torch.cuda.is_available():
                 videos = videos.cuda()
                 sentences = sentences.cuda()
             # compute the embeddings
             with torch.no_grad():
-                confidence_map,loss = self.model.forward(videos, sentences, sentence_lengths, video_name, self.logger, self.iters, max_iter)
+                confidence_map,loss = self.model.forward(videos, sentences, sentence_lengths, video_name, word_id, self.logger, self.iters, max_iter)
 
             confidence_map = confidence_map.detach().cpu().numpy()
             plot_map(confidence_map,index,self.opt.model_name)
@@ -276,6 +299,15 @@ class Runner(object):
             if 'weight' in name and param.requires_grad == True:
                 l2_reg += torch.norm(param) 
         return l2_reg * self.opt.weight_decay
+    
+    def get_vocab(self):
+        if self.opt.dataset == 'Charades':
+            vocab = pickle.load(open(os.path.join(self.opt.vocab_path, 'Charades_vocab.pkl'), 'rb'))
+            self.opt.vocab_size = len(vocab)
+        elif self.opt.dataset == 'ActivityNet':
+            vocab = pickle.load(open(os.path.join(self.opt.vocab_path, 'ActivityNet_vocab.pkl'), 'rb'))
+            self.opt.vocab_size = len(vocab)
+        return vocab
     
     
         

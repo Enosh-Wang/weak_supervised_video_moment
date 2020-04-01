@@ -75,7 +75,7 @@ def parse_args():
                         help='LogSumExp temp.')
     parser.add_argument('--lambda_softmax', default=9., type=float,
                         help='Attention softmax temperature.')
-    parser.add_argument('--agg_func', default="LogSumExp",
+    parser.add_argument('--agg_func', default="Max",
                         help='LogSumExp|Mean|Max|Sum')
     parser.add_argument('--continuation_func', default="Log",
                         help='Linear|Plinear|Sigmoid|Log|Exp')

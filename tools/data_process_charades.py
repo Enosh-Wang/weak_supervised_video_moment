@@ -34,12 +34,12 @@ def poolData(feats,num_prop=100,num_bin=1,num_sample_bin=3,pool_type="mean"):
         xmin=max(x[0]+0.0001,tmp_anchor_xmin[idx]*feat_length)
         xmax=min(x[-1]-0.0001,tmp_anchor_xmax[idx]*feat_length)
         if xmax<x[0]:
-            #video_feature.append(zero_sample)
-            video_feature.append(feats[0])
+            video_feature.append(zero_sample)
+            #video_feature.append(feats[0])
             continue
         if xmin>x[-1]:
-            #video_feature.append(zero_sample)
-            video_feature.append(feats[-1])
+            video_feature.append(zero_sample)
+            #video_feature.append(feats[-1])
             continue
         
         # 每个anchor采样3个点，线性插值
@@ -65,14 +65,14 @@ if __name__ == "__main__":
     datapath = '/home/share/wangyunxiao/Charades'
     feature_path = 'c3d_features'
 
-    video_feature = os.listdir(os.path.join(datapath,feature_path))
-    video_feature.sort()
+    video_feature_list = os.listdir(os.path.join(datapath,feature_path))
+    video_feature_list.sort()
 
     video_list = []
     feats_list = []
     length = 0
     num = 0
-    for value in video_feature:
+    for value in video_feature_list:
         video_name = value.split('.')[0]
         video_feat_mat = sio.loadmat(os.path.join(datapath,feature_path,value))
         feats = video_feat_mat['feature']
@@ -85,5 +85,5 @@ if __name__ == "__main__":
     print('average_length:',length/num)
     data = dict(zip(video_list,feats_list))
     # 保存新的特征
-    with open(os.path.join(datapath,'charades_n20.pkl'),'wb') as f:
+    with open(os.path.join(datapath,'charades_n20_mean.pkl'),'wb') as f:
         pickle.dump(data,f)

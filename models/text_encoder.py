@@ -56,11 +56,11 @@ class TextEncoderGRU(nn.Module):
         I = torch.LongTensor(sentence_lengths).view(-1, 1, 1) # view的作用类似reshape
         I = I.expand(sentences.size(0), 1, self.opt.joint_dim)-1
         I = I.cuda()
-        sentences = torch.gather(sentences, 1, I).squeeze(1)
+        global_sentences = torch.gather(sentences, 1, I).squeeze(1)
         # normalization in the joint embedding space
-        sentences = l2norm(sentences,dim=-1)
+        global_sentences = l2norm(global_sentences,dim=-1)
         
-        return sentences
+        return global_sentences,sentences
 
 class SentenceEncoder(nn.Module):
     def __init__(self, args):

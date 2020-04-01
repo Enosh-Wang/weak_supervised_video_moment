@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from tools.util import l2norm
-
+import torch.nn.functional as F
 class BMN(nn.Module):
     def __init__(self, opt):
         super(BMN, self).__init__()
@@ -16,45 +16,63 @@ class BMN(nn.Module):
 
         self._get_interp1d_mask()
 
-        self.hidden_dim_1d = 256
-        self.hidden_dim_2d = 256
+        self.hidden_dim_1d = 512
+        self.hidden_dim_2d = 512
         self.hidden_dim_3d = 512
 
         # Proposal Evaluation Module
         self.x_1d_p = nn.Sequential(
-            nn.Conv1d(self.opt.joint_dim, self.hidden_dim_1d, kernel_size=3, padding=1),
+            nn.Conv1d(self.opt.video_dim, self.hidden_dim_1d, kernel_size=3, padding=1),
             nn.BatchNorm1d(self.hidden_dim_1d),
             nn.ReLU(inplace=True)
         )
         self.x_3d_p = nn.Sequential(
             nn.Conv3d(self.hidden_dim_1d, self.hidden_dim_3d, kernel_size=(self.num_sample, 1, 1),stride=(self.num_sample, 1, 1)),
-            nn.BatchNorm3d(self.hidden_dim_3d),
+            #nn.BatchNorm3d(self.hidden_dim_3d),
             nn.ReLU(inplace=True)
         )
 
         self.x_2d_p = nn.Sequential(
-            nn.Conv2d(self.hidden_dim_3d, self.hidden_dim_2d, kernel_size=1), 
-            nn.BatchNorm2d(self.hidden_dim_2d),
+            nn.Conv2d(self.hidden_dim_3d+self.opt.joint_dim, self.hidden_dim_2d, kernel_size=3,padding=1), 
+            #nn.BatchNorm2d(self.hidden_dim_2d),
             nn.ReLU(inplace=True),
-            nn.Conv2d(self.hidden_dim_2d, self.opt.joint_dim, kernel_size=1), 
-            nn.BatchNorm2d(self.opt.joint_dim),
-            nn.Tanh()
+            nn.Conv2d(self.hidden_dim_2d, 1, kernel_size=3,padding=1), 
+            #nn.BatchNorm2d(1),
         )
-
+        '''
+        self.x_2d_p1 = nn.Sequential(
+            nn.Conv2d(self.hidden_dim_3d, self.opt.joint_dim, kernel_size=1), 
+            nn.BatchNorm2d(self.opt.joint_dim),
+        )
+        '''
+        
         
 
-    def forward(self, video): #, sentence):
-        # 转换维度，维度在前，帧数在后 [b,c,t]
+    def forward(self, video, sentence, mask):
+        # 转换维度，维度在前，帧数在后 [b,c,t] sentence [b,c]
         video = video.transpose(1,2)
         # 一层时序卷积
         confidence_map = self.x_1d_p(video)
         # 置信度图
         confidence_map = self._boundary_matching_layer(confidence_map)
         confidence_map = self.x_3d_p(confidence_map).squeeze(2) # -> [b,c,d,t]
-        confidence_map = self.x_2d_p(confidence_map) # -> [b,c,d,t]
+        #print(torch.sum(confidence_map[0],dim=0))
+
+        b,c,d,t = confidence_map.size()
+        sentence = sentence.view(b,c,1,1).repeat(1,1,d,t)
+        feature = torch.cat([confidence_map,sentence],dim=1).masked_fill(mask==0,0) #[b,2c,d,t]
+        #print(torch.sum(feature[0],dim=0))
+        attn = self.x_2d_p(feature) # -> [b,1,d,t]
+        #print(torch.sum(attn[0],dim=0))
+        #exit()
+        attn = attn.masked_fill(mask == 0 ,float('-inf')).view(b,-1)
+        attn = F.softmax(attn,dim=-1).view(b,1,d,t)#self.opt.lambda_softmax
         
-        confidence_map = l2norm(confidence_map,dim=1)
-        return confidence_map
+        confidence_map = confidence_map*attn
+        #confidence_map = l2norm(confidence_map,dim=1)
+        #confidence_map = self.x_2d_p1(confidence_map)
+        #confidence_map = F.dropout(confidence_map,p=0.5,training=self.training)
+        return confidence_map,attn.squeeze()
 
     def _boundary_matching_layer(self, x):
         input_size = x.size()
