@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from tools.util import PositionalEncoding,multihead_mask,l2norm
 from models.graph_convolution import GraphConvolution
+from transformers import BertModel, BertConfig
 
 class TextEncoderMulti(nn.Module):
 
@@ -41,12 +42,16 @@ class TextEncoderGRU(nn.Module):
 
         self.opt = opt
         self.rnn = nn.GRU(opt.word_dim, opt.joint_dim//2, opt.RNN_layers, bidirectional=True)
+        nn.init.orthogonal_(self.rnn.weight_ih_l0)     
+        nn.init.orthogonal_(self.rnn.weight_hh_l0)
+        nn.init.orthogonal_(self.rnn.weight_ih_l0_reverse)
+        nn.init.orthogonal_(self.rnn.weight_hh_l0_reverse)  
 
     def forward(self, sentences, sentence_lengths):
         """Handles variable size captions
         """
         sentences = sentences.transpose(0,1) # [b,l,c]->[l,b,c]
-
+        mask = multihead_mask(sentences, sentence_lengths)
         packed = pack_padded_sequence(sentences, sentence_lengths)
         out, _ = self.rnn(packed)
         padded = pad_packed_sequence(out)
@@ -60,7 +65,7 @@ class TextEncoderGRU(nn.Module):
         # normalization in the joint embedding space
         global_sentences = l2norm(global_sentences,dim=-1)
         
-        return global_sentences,sentences
+        return global_sentences,sentences,mask
 
 class SentenceEncoder(nn.Module):
     def __init__(self, args):
@@ -84,3 +89,26 @@ class SentenceEncoder(nn.Module):
         x = F.dropout(x, self.dropout, self.training)
 
         return x
+
+class TextNet(nn.Module):
+    def __init__(self, opt): #code_length为fc映射到的维度大小
+        super(TextNet, self).__init__()
+
+        modelConfig = BertConfig.from_pretrained('/home/share/wangyunxiao/BERT/bert-base-uncased-config.json')
+        self.textExtractor = BertModel.from_pretrained('/home/share/wangyunxiao/BERT/bert-base-uncased-pytorch_model.bin', config=modelConfig)
+        embedding_dim = self.textExtractor.config.hidden_size
+        for param in self.textExtractor.parameters():
+            param.requires_grad = False
+
+        self.fc = nn.Linear(embedding_dim, opt.joint_dim)
+
+    def forward(self, tokens, segments, input_masks):
+        self.textExtractor.eval()
+        output=self.textExtractor(tokens, token_type_ids=segments,
+                                 		attention_mask=input_masks)
+        text_embeddings = output[0]
+        #output[0](batch size, sequence length, model hidden dimension)
+
+        features = self.fc(text_embeddings)
+        features = torch.tanh(features)
+        return features

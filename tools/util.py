@@ -5,6 +5,64 @@ from collections import OrderedDict
 import math
 import pickle
 
+def get_match_map(tscale, start_ratio, end_ratio):
+    
+    match_map = []
+    temporal_gap = 1. / tscale
+    duration_start = int(tscale*start_ratio)
+    duration_end = int(tscale*(1-end_ratio))
+    for idx in range(tscale): # start time
+        tmp_match_window = []
+        xmin = temporal_gap * idx
+        for jdx in range(duration_start + 1, duration_end + 1): # duration
+            xmax = xmin + temporal_gap * jdx
+            tmp_match_window.append([xmin, xmax])
+        match_map.append(tmp_match_window)
+    match_map = np.array(match_map)  # 100x100x2
+    match_map = np.transpose(match_map, [1, 0, 2])  # [0,1] [1,2] [2,3].....[99,100]
+    match_map = np.reshape(match_map, [-1, 2])  # [0,2] [1,3] [2,4].....[99,101]   # duration x start
+    return match_map  # duration is same in row, start is same in col
+
+def iou_with_anchors(anchors_min, anchors_max, box_min, box_max):
+    """Compute jaccard score between a box and the anchors.
+    """
+    len_anchors = anchors_max - anchors_min
+    int_xmin = np.maximum(anchors_min, box_min)
+    int_xmax = np.minimum(anchors_max, box_max)
+    inter_len = np.maximum(int_xmax - int_xmin, 0.)
+    union_len = len_anchors - inter_len + box_max - box_min
+    # print inter_len,union_len
+    jaccard = np.divide(inter_len, union_len)
+    return jaccard
+    
+
+def get_iou_map(tscale, start_ratio, end_ratio, match_map, mask):
+
+    map_buffer = []
+
+    duration_start = int(tscale*start_ratio)
+    duration_end = int(tscale*(1-end_ratio))
+
+    for idx in range(duration_start, duration_end): # 外层遍历 duration，即遍历行
+        for jdx in range(tscale): # 内层遍历 start time，即遍历列
+            # 起止点的索引
+            start_index = jdx
+            end_index = start_index + idx + 1
+            # 如果是上一步中选定的起止点，则进一步验证置信度
+            if end_index <= tscale :
+                # proposal的坐标
+                xmin = start_index/tscale
+                xmax = end_index/tscale
+                iou_map = iou_with_anchors(match_map[:, 0], match_map[:, 1], xmin, xmax)*mask
+                map_buffer.append(np.squeeze(iou_map))
+            else:
+                map_buffer.append(np.zeros((duration_end-duration_start)*tscale))
+    
+    return np.stack(map_buffer)
+
+
+
+
 def l1norm(X, dim, eps=1e-8):
     """L1-normalize columns of X
     """
@@ -19,26 +77,34 @@ def l2norm(X, dim, eps=1e-8):
     X = torch.div(X, norm)
     return X
 
-def LogSumExp(X, lambda_lse, dim):
-    score = torch.log(torch.sum(torch.exp(X*lambda_lse),dim))/lambda_lse
+def LogSumExp(X, lambda_lse, dim, keepdim = False):
+    score = torch.log(torch.sum(torch.exp(X*lambda_lse),dim,keepdim=keepdim))/lambda_lse
     return score
 
-def get_mask(tscale):
+def get_mask(tscale, start_ratio, end_ratio):
 
     bm_mask = []
-    # 遍历每行，逐行计算掩码，逐行在末尾增加0
-    for idx in range(tscale):
+
+    duration_start = int(tscale*start_ratio)
+    duration_end = int(tscale*(1-end_ratio))
+
+    # 遍历每行，也就是遍历duration，逐行计算掩码，逐行在末尾增加0
+    for idx in range(duration_start, duration_end):
         mask_vector = [1 for i in range(tscale - idx)
                     ] + [0 for i in range(idx)]
         bm_mask.append(mask_vector)
     bm_mask = np.array(bm_mask, dtype=np.int)
-    return torch.IntTensor(bm_mask).cuda()
+    return bm_mask
 
-def get_mask_spare(tscale):
+def get_mask_spare(tscale, start_ratio, end_ratio):
          
     bm_mask = []
+
+    duration_start = int(tscale*start_ratio)
+    duration_end = int(tscale*(1-end_ratio))
+    
     # 遍历每行，逐行计算掩码，逐行在末尾增加0
-    for duration in range(1, tscale+1):
+    for duration in range(duration_start + 1, duration_end + 1):
         mask_vector = []
         k = np.ceil(np.log2(duration/6))
         s = 2**(k-1)
@@ -57,7 +123,7 @@ def get_mask_spare(tscale):
         mask_vector += [0 for i in range(duration-1)]
         bm_mask.append(mask_vector)
     bm_mask = np.array(bm_mask, dtype=np.int)
-    return torch.IntTensor(bm_mask).cuda()
+    return bm_mask
 
 def load_glove(glove_path):
     with open(glove_path, 'rb') as f:

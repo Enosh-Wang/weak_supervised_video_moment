@@ -19,9 +19,9 @@ def parse_args():
                         help='Path to saved vocabulary pickle files.')
     parser.add_argument('--glove_path', default='/home/share/wangyunxiao/Glove/glove.840B.300d/glove.840B.300d.pkl',
                         help='Path to saved vocabulary pickle files.')
-    parser.add_argument('--num_epochs', default=40, type=int)
-    parser.add_argument('--learning_rate', default=.0002, type=float) # 论文中设为0.001
-    parser.add_argument('--weight_decay', default=0.01, type=float)
+    parser.add_argument('--num_epochs', default=20, type=int)
+    parser.add_argument('--learning_rate', default=.002, type=float) # 论文中设为0.001
+    parser.add_argument('--weight_decay', default=0.0001, type=float)
     parser.add_argument('--lr_update', default=20, type=int) # 论文中为15
     parser.add_argument('--global_margin', default=0.2, type=float,
                         help='Rank loss margin.') # 0.1 for Charades-STA and 0.2 for DiDeMo
@@ -38,6 +38,8 @@ def parse_args():
     parser.add_argument('--temporal_scale', default=20, type=int,
                         help='ActivityNet=100，Charades=20') # 视频时序长度
     parser.add_argument('--prop_boundary_ratio', default=0.5, type=float) # proposal拓展率
+    parser.add_argument('--start_ratio', default=0, type=float) # proposal拓展率
+    parser.add_argument('--end_ratio', default=0.5, type=float) # proposal拓展率
     parser.add_argument('--num_sample', default=6, type=int,
                         help='ActivityNet=32，Charades=6') # 采样点数目
     parser.add_argument('--num_sample_perbin', default=3, type=int) #  子采样点数目
@@ -45,7 +47,7 @@ def parse_args():
     parser.add_argument('--soft_nms_alpha', type=float, default=0.4)
     parser.add_argument('--soft_nms_low_thres',type=float,default=0.5)
     parser.add_argument('--soft_nms_high_thres',type=float,default=0.9)
-    parser.add_argument('--raw_feature_norm', default="clipped_l2norm",
+    parser.add_argument('--raw_feature_norm', default="no_norm",
                         help='clipped_l2norm|l2norm|clipped_l1norm|l1norm|no_norm|softmax')
     parser.add_argument('--sentence_heads', default=4, type=int,
                         help='')
@@ -73,17 +75,21 @@ def parse_args():
                         help='Use max instead of sum in the rank loss.')
     parser.add_argument('--lambda_lse', default=6., type=float,
                         help='LogSumExp temp.')
-    parser.add_argument('--lambda_softmax', default=9., type=float,
+    parser.add_argument('--lambda_softmax', default=3., type=float,
                         help='Attention softmax temperature.')
     parser.add_argument('--agg_func', default="Max",
                         help='LogSumExp|Mean|Max|Sum')
     parser.add_argument('--continuation_func', default="Log",
                         help='Linear|Plinear|Sigmoid|Log|Exp')
+    parser.add_argument('--model_mode', default="image_IMRAM", type=str,
+                        help='full_IMRAM|text_IMRAM')
+    parser.add_argument('--iteration_step', default=3, type=int,
+                        help='routing_step')
     args = parser.parse_args()
     return args
 
 if __name__ == '__main__':
-    #os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+    #os.environ["CUDA_VISIBLE_DEVICES"] = "1"
     opt = parse_args()
     print(opt)
     logging.basicConfig(format='%(asctime)s %(message)s', level=logging.INFO)

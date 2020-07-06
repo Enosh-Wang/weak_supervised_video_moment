@@ -6,3 +6,4 @@ runs/*
 output/
 img/
 vocab/
+BMN_best.pth.tar

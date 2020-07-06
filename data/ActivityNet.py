@@ -14,11 +14,12 @@ class ActivityNet(data.Dataset):
     Load precomputed sentences and videos features
     """
 
-    def __init__(self, data_split, data_path, word2vec):
+    def __init__(self, data_split, data_path, word2vec, vocab):
         """
         根据选定的数据集，读取csv文件，获取视频列表和标注信息，例如charades_test.csv
         """    
         # Load Vocabulary Wrapper
+        self.vocab=vocab
         self.word2vec=word2vec
         path=os.path.join(data_path,"caption/activitynet_"+ str(data_split) + ".csv")
         df=pandas.read_csv(path)
@@ -45,8 +46,10 @@ class ActivityNet(data.Dataset):
         sentence = self.description[index]
         words = nltk.tokenize.word_tokenize(str(sentence).lower())
         sentence = np.asarray([self.word2vec[word] for word in words if word in self.word2vec])
+        word_id = np.asarray([self.vocab(word) for word in words if word in self.word2vec])
         sentence = torch.Tensor(sentence)
-        return video, sentence, index, video_name
+        word_id = torch.Tensor(word_id)
+        return video, sentence, index, video_name, word_id
 
     def __len__(self):
         # 长度按照句子数量，其实就是pair的数量

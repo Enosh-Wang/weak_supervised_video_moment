@@ -6,3 +6,5 @@ python main.py --model_name test
 --dataset
 --video_dim
 --margin
+
+CUDA_VISIBLE_DEVICES=1 python main.py --model_name ActivityNet --dataset ActivityNet --temporal_scale 100 --video_dim 500 --batch_size 8
