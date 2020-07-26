@@ -4,6 +4,12 @@ import numpy as np
 from collections import OrderedDict
 import math
 import pickle
+import math
+
+def Lognorm(x,mean,std):
+    x = x.clamp(min=0)+1e-8
+    return torch.exp( -0.5*( (torch.log(x)-mean)/std )**2 ) / std*x*math.sqrt(math.pi*2)
+
 
 def get_match_map(tscale, start_ratio, end_ratio):
     
@@ -134,8 +140,8 @@ def multihead_mask(x, lengths):
     seq_size, batch_size, _ = x.size()
     key_padding_mask = torch.BoolTensor(batch_size,seq_size)
     for i in range(batch_size):
-        key_padding_mask[i,:lengths[i]] = False
-        key_padding_mask[i,lengths[i]:] = True
+        key_padding_mask[i,:lengths[i]] = True
+        key_padding_mask[i,lengths[i]:] = False
     key_padding_mask = key_padding_mask.cuda()
     return key_padding_mask
 

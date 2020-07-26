@@ -87,7 +87,7 @@ class Runner(object):
         self.model.train()
 
         end = time.time()
-        for i, (videos, sentences, sentence_lengths, index, word_ids, gt_map) in enumerate(train_loader):
+        for i, (videos, sentence_lengths, index, word_ids, gt_map, segments, input_masks) in enumerate(train_loader):
             # measure data loading time
             data_time.update(time.time() - end)
             self.iters += 1
@@ -95,9 +95,9 @@ class Runner(object):
             # Set mini-batch dataset
             if torch.cuda.is_available():
                 videos = videos.cuda()
-                sentences = sentences.cuda()
+                word_ids = word_ids.cuda()
 
-            _,loss = self.model.forward(videos, sentences, sentence_lengths, word_ids, gt_map, self.logger, self.iters, lam)
+            _,loss = self.model.forward(videos, sentence_lengths, word_ids, gt_map, segments, input_masks, self.logger, self.iters, lam)
  
             self.optimizer.zero_grad()
             # compute gradient and do SGD step
@@ -136,13 +136,13 @@ class Runner(object):
         batch_time = AverageMeter()
         end = time.time()
         all_result = {}
-        for iters, (videos, sentences, sentence_lengths, index, word_ids, gt_map) in enumerate(val_loader):
+        for iters, (videos, sentence_lengths, index, word_ids, gt_map, segments, input_masks) in enumerate(val_loader):
             if torch.cuda.is_available():
                 videos = videos.cuda()
-                sentences = sentences.cuda()
+                word_ids = word_ids.cuda()
             # compute the embeddings
             with torch.no_grad():
-                confidence_map,loss = self.model.forward(videos, sentences, sentence_lengths, word_ids, gt_map, self.logger, self.iters, lam)
+                confidence_map,loss = self.model.forward(videos, sentence_lengths, word_ids, gt_map, segments, input_masks, self.logger, self.iters, lam)
             
             confidence_map = confidence_map.detach().cpu().numpy()
             batch_result = self.generate_proposal(confidence_map, index)
@@ -245,14 +245,14 @@ class Runner(object):
         end = time.time()
         all_result = {}
         lam = get_lambda(self.opt.num_epochs,self.opt.num_epochs,self.opt.continuation_func)
-        for iters, (videos, sentences, sentence_lengths, index, word_ids, gt_map, ) in enumerate(test_loader):
+        for iters, (videos, sentence_lengths, index, word_ids, gt_map, segments, input_masks) in enumerate(test_loader):
             if torch.cuda.is_available():
                 videos = videos.cuda()
-                sentences = sentences.cuda()
+                word_ids = word_ids.cuda()
             # compute the embeddings
             with torch.no_grad():
                 self.iters += 1
-                confidence_map,loss = self.model.forward(videos, sentences, sentence_lengths, word_ids, gt_map, self.logger, self.iters, lam)
+                confidence_map,loss = self.model.forward(videos, sentence_lengths, word_ids, gt_map, segments, input_masks, self.logger, self.iters, lam)
 
             confidence_map = confidence_map.detach().cpu().numpy()
             plot_map(confidence_map,index,self.opt.model_name)

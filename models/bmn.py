@@ -6,7 +6,9 @@ import torch.nn as nn
 from tools.util import l2norm
 import torch.nn.functional as F
 from collections import OrderedDict
-from models.IMRAM import SCAN,ContrastiveLoss,frame_by_word
+from models.IMRAM import frame_by_word
+from DC.modules.modulated_deform_conv import ModulatedDeformConvPack
+
 class BMN(nn.Module):
     def __init__(self, opt):
         super(BMN, self).__init__()
@@ -35,15 +37,6 @@ class BMN(nn.Module):
             ('norm2',nn.BatchNorm3d(self.hidden_dim_3d)),
             ('relu2',nn.ReLU(inplace=True))])
         )
-
-        # self.x_2d_p = nn.Sequential(
-        #     nn.Conv2d(self.hidden_dim_3d, self.opt.joint_dim, kernel_size=1), 
-        #     nn.BatchNorm2d(self.opt.joint_dim),
-        #     nn.ReLU(inplace=True),
-        #     nn.Conv2d(self.hidden_dim_3d, self.opt.joint_dim, kernel_size=1), 
-        #     nn.BatchNorm2d(self.opt.joint_dim),
-        # )
-
         self.x_2d_p1 = nn.Sequential(OrderedDict([
             ('conv3',nn.Conv2d(self.hidden_dim_3d+2, self.hidden_dim_2d, kernel_size=1)), 
             ('norm3',nn.BatchNorm2d(self.hidden_dim_2d)),
@@ -54,20 +47,12 @@ class BMN(nn.Module):
             ('norm4',nn.BatchNorm2d(self.opt.joint_dim)),
             ('relu4',nn.ReLU(inplace=True))])
         )
-
         self.x_2d_p3 = nn.Sequential(OrderedDict([
-            ('conv5',nn.Conv2d(self.opt.joint_dim, 1, kernel_size=3,padding=1)), 
-            ('sigmoid',nn.Sigmoid())])
+            ('conv5',nn.Conv2d(self.opt.joint_dim*2, self.opt.joint_dim, kernel_size=1)), 
+            ('norm5',nn.BatchNorm2d(self.opt.joint_dim)),
+            ('relu5',nn.ReLU(inplace=True))])
         )
 
-        self.fc = nn.Linear(self.opt.joint_dim,self.opt.joint_dim)
-        self.ga = nn.Linear(opt.joint_dim, opt.joint_dim)
-        nn.init.xavier_uniform_(self.ga.weight)
-        nn.init.zeros_(self.ga.bias)
-
-        self.de = nn.Linear(opt.joint_dim, opt.joint_dim)
-        nn.init.xavier_uniform_(self.de.weight)
-        nn.init.zeros_(self.de.bias)
         # for m in self.modules():
         #     if isinstance(m,nn.Conv1d) or isinstance(m,nn.Conv2d) or isinstance(m,nn.Conv3d):
         #         nn.init.kaiming_normal_(m.weight, nonlinearity='relu')#卷积层参数初始化
@@ -75,9 +60,6 @@ class BMN(nn.Module):
         #     elif isinstance(m,nn.BatchNorm1d) or isinstance(m,nn.BatchNorm2d) or isinstance(m,nn.BatchNorm3d):
         #         nn.init.ones_(m.weight)
         #         nn.init.zeros_(m.bias)
-        #     # elif isinstance(m,nn.Conv2d): #可以加层FC稍作处理，免得最后一层不能用Relu
-        #     #     nn.init.xavier_uniform_(m.weight)
-        #     #     nn.init.zeros_(m.bias)
         for n,m in self.named_modules():
             if 'conv' in n:
                 nn.init.kaiming_normal_(m.weight, nonlinearity='relu')#卷积层参数初始化
@@ -85,6 +67,8 @@ class BMN(nn.Module):
             if 'norm' in n:
                 nn.init.ones_(m.weight)
                 nn.init.zeros_(m.bias)
+
+        self.mdc = ModulatedDeformConvPack(self.opt.joint_dim,1,kernel_size=3,stride=1,padding=1)
 
 
     def forward(self, video, sentence, mask, match_map, sentence_mask):
@@ -96,40 +80,31 @@ class BMN(nn.Module):
         confidence_map = self._boundary_matching_layer(confidence_map)
         confidence_map = self.x_3d_p(confidence_map).squeeze(2) # -> [b,c,d,t]
         
+        # 拼接时间戳
         b,c,d,t = confidence_map.size()
         match_map = torch.Tensor(match_map).cuda().view(1,d,t,2)
         match_map = match_map.permute(0,3,1,2).repeat(b,1,1,1)
-
         length = match_map[:,1,:,:] - match_map[:,0,:,:]
         center = match_map[:,0,:,:] + length/2
-        #confidence_map = torch.cat((confidence_map,match_map),dim=1)
-        confidence_map = torch.cat((confidence_map,center.unsqueeze(1),length.unsqueeze(1)),dim=1)
+        #confidence_map = torch.cat((confidence_map,match_map),dim=1) # 拼接开始和结束时刻
+        confidence_map = torch.cat((confidence_map,center.unsqueeze(1),length.unsqueeze(1)),dim=1) # 拼接中点和长度
         confidence_map = self.x_2d_p1(confidence_map)
 
-        confidence_map = confidence_map.permute(0,2,3,1).view(b,-1,c) # ->[b,d*t,c]
-        sentence_embedding = frame_by_word(confidence_map,mask.view(1,-1),sentence,sentence_mask,self.opt)
+        output = self.x_2d_p2(confidence_map)
         
-        gama = torch.tanh(self.ga(sentence_embedding))
-        deta = torch.tanh(self.de(sentence_embedding))
+        # # 模态处理
+        # confidence_map = confidence_map.permute(0,2,3,1).view(b,-1,c) # ->[b,d*t,c]
+        # sentence = frame_by_word(confidence_map,mask.view(1,-1),sentence,sentence_mask,self.opt)
+        # confidence_map = confidence_map.permute(0,2,1).view(b,c,d,t)
+        # sentence = sentence.permute(0,2,1).view(b,c,d,t)
+        # feature = torch.cat([confidence_map,sentence],dim=1)
+        # feature = self.x_2d_p3(feature)
 
-        mean = torch.mean(confidence_map,dim=(1,2),keepdim=True)
-        var = torch.var(confidence_map,dim=(1,2),keepdim=True)+1e-6
-        confidence_map = gama*(confidence_map-mean)/var+deta
-
-        confidence_map = confidence_map.permute(0,2,1).view(b,c,d,t)
+        attn = torch.sigmoid(self.mdc(confidence_map))
+        #feature = self.x_2d_p3(feature)
+        output = output*attn
         
-        # b,c,d,t = confidence_map.size()
-        # sentence = sentence.view(b,c,1,1).repeat(1,1,d,t)
-        # feature = torch.cat([confidence_map,sentence],dim=1).masked_fill(mask==0,0) #[b,2c,d,t]
-        # attn = self.x_2d_p(feature) # -> [b,1,d,t]
-        # attn = attn.masked_fill(mask == 0 ,float('-inf')).view(b,-1)
-        # attn = F.softmax(self.opt.lambda_softmax*attn,dim=-1).view(b,1,d,t)
-        
-        #confidence_map = confidence_map+confidence_map*attn
-        confidence_map = self.x_2d_p2(confidence_map)
-        confidence_map1 = self.x_2d_p3(confidence_map)
-        
-        return confidence_map,confidence_map1#,attn.squeeze()        
+        return output
 
     def _boundary_matching_layer(self, x):
         input_size = x.size()

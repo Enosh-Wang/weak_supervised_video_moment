@@ -7,6 +7,36 @@ from models.CMIL import get_lambda, get_video_score_nms, get_video_score_nms_all
 import time
 import random
 from torch.nn.utils.rnn import pack_padded_sequence
+import matplotlib
+matplotlib.use('agg')
+import matplotlib.pyplot as plt
+import os
+
+def plot_map(score_maps, map_name):
+    score_maps = score_maps.cpu().numpy()
+
+    batch_size = score_maps.shape[0]
+    f = plt.figure(figsize=(6,4))
+    for i in range(batch_size):
+        score_map = score_maps[i]
+        plt.matshow(score_map, cmap = plt.cm.cool)
+        plt.ylabel("duration")
+        plt.xlabel("start time")
+        plt.colorbar()
+        plt.savefig(os.path.join(str(i)+map_name+'.png'))
+        plt.clf()    
+    plt.close(f)
+
+def norm(score):
+    b,d,t = score.size()
+    score = score.view(b,-1)
+    score_min = torch.min(score, dim = -1, keepdim = True)[0]
+    score_max = torch.max(score, dim = -1, keepdim = True)[0]
+    score_norm = (score - score_min)/(score_max-score_min)
+    score = score - score_min
+    score = score*score_norm
+    score = score.view(b,d,t)
+    return score
 
 class Contrastive(nn.Module):
     """
@@ -18,9 +48,37 @@ class Contrastive(nn.Module):
         self.margin = opt.global_margin
         self.max_violation = opt.max_violation
 
-        self.fc = nn.Linear(opt.joint_dim*2, 1)
+        self.fc = nn.Linear(opt.joint_dim, opt.joint_dim//4)
         nn.init.xavier_uniform_(self.fc.weight)
         nn.init.zeros_(self.fc.bias)
+
+        self.fc1 = nn.Linear(opt.joint_dim, opt.joint_dim//4)
+        nn.init.xavier_uniform_(self.fc1.weight)
+        nn.init.zeros_(self.fc1.bias)
+
+        self.fc2 = nn.Linear(opt.joint_dim, opt.joint_dim//4)
+        nn.init.xavier_uniform_(self.fc2.weight)
+        nn.init.zeros_(self.fc2.bias)
+
+        self.fc3 = nn.Linear(opt.joint_dim, opt.joint_dim//4)
+        nn.init.xavier_uniform_(self.fc3.weight)
+        nn.init.zeros_(self.fc3.bias)
+
+        self.fc4 = nn.Linear(opt.joint_dim, opt.joint_dim//4)
+        nn.init.xavier_uniform_(self.fc4.weight)
+        nn.init.zeros_(self.fc4.bias)
+
+        self.fc5 = nn.Linear(opt.joint_dim, opt.joint_dim//4)
+        nn.init.xavier_uniform_(self.fc5.weight)
+        nn.init.zeros_(self.fc5.bias)
+
+        self.fc6 = nn.Linear(opt.joint_dim, opt.joint_dim//4)
+        nn.init.xavier_uniform_(self.fc6.weight)
+        nn.init.zeros_(self.fc6.bias)
+
+        self.fc7 = nn.Linear(opt.joint_dim, opt.joint_dim//4)
+        nn.init.xavier_uniform_(self.fc7.weight)
+        nn.init.zeros_(self.fc7.bias)
 
     def forward(self, videos, sentences, opt, writer, iters, is_training, lam, mask, match_map, valid_num, iou_maps):
         b,c,d,t = videos.size()
@@ -38,47 +96,90 @@ class Contrastive(nn.Module):
         sentence_mean = torch.mean(sentences,dim=1,keepdim=True)
         sentences = sentences - sentence_mean
 
-        for i in range(b):
-            # 聚合视频前景特征
-            video = videos[i] # [b,c,d,t] -> [c,d,t]
-            sentence = sentences[i].view(c,1,1).repeat(1,d,t)
-            score = torch.cosine_similarity(video,sentence,dim=0).masked_fill(mask==0,float('-inf')).view(-1)
-            score = F.softmax(score) # [d*t]
-            video_postive = torch.sum(score*video.view(c,d*t),dim=1) # [c,d*t] -> [c]
+        videos = videos.permute(0,2,3,1) # [b,c,d,t] -> [b,d,t,c]
+        videos1 = self.fc(videos).permute(0,3,1,2)
+        videos2 = self.fc1(videos).permute(0,3,1,2)
+        videos3 = self.fc2(videos).permute(0,3,1,2)
+        videos4 = self.fc3(videos).permute(0,3,1,2)
 
-            gt_sentence = sentences[i]
-            gt_sentence = gt_sentence.expand_as(sentences) # [b,c]
-            sim = torch.cosine_similarity(gt_sentence,sentences,dim=1) # [b,c] -> [b]
-            idx = torch.argsort(sim,descending=True) # 降序
+        sentences1 = self.fc4(sentences)
+        sentences2 = self.fc5(sentences)
+        sentences3 = self.fc6(sentences)
+        sentences4 = self.fc7(sentences)
 
-            if len(idx) > 11:
-                neg_sentences = sentences[idx[6:-5]]
-            else:
-                neg_sentences = sentences[idx[1:]]
+        videos = torch.cat([videos1,videos2,videos3,videos4],dim=1)
+        sentences = torch.cat([sentences1,sentences2,sentences3,sentences4],dim=1)
+        # for i in range(b):
+        #     # 聚合视频前景特征
+        #     video = videos[i] # [b,c,d,t] -> [c,d,t]
+        #     sentence = sentences[i].view(c,1,1).repeat(1,d,t)
+        #     score = torch.cosine_similarity(video,sentence,dim=0).masked_fill(mask==0,float('-inf')).view(-1)
+        #     score = F.softmax(score) # [d*t]
+        #     video_postive = torch.sum(score*video.view(c,d*t),dim=1) # [c,d*t] -> [c]
+
+        #     gt_sentence = sentences[i]
+        #     gt_sentence = gt_sentence.expand_as(sentences) # [b,c]
+        #     sim = torch.cosine_similarity(gt_sentence,sentences,dim=1) # [b,c] -> [b]
+        #     idx = torch.argsort(sim,descending=True) # 降序
+
+        #     if len(idx) > 11:
+        #         neg_sentences = sentences[idx[6:-5]]
+        #     else:
+        #         neg_sentences = sentences[idx[1:]]
             
-            pos_score = torch.cosine_similarity(video_postive,sentences[i],dim=0) 
-            temp = video_postive.expand_as(neg_sentences)
-            neg_score = torch.cosine_similarity(temp,neg_sentences,dim=1) # [n,c] -> [n]
-            pos_score = pos_score.expand_as(neg_score)
-            vas = (opt.global_margin + neg_score - pos_score).clamp(min=0) # [b]
-            vas_loss.append(vas.mean())
+        #     pos_score = torch.cosine_similarity(video_postive,sentences[i],dim=0) 
+        #     temp = video_postive.expand_as(neg_sentences)
+        #     neg_score = torch.cosine_similarity(temp,neg_sentences,dim=1) # [n,c] -> [n]
+        #     pos_score = pos_score.expand_as(neg_score)
+        #     vas = (opt.global_margin + neg_score - pos_score).clamp(min=0) # [b]
+        #     vas_loss.append(vas.mean())
 
-            if sim[idx[1]] > 0.9:
-                pse_video = videos[idx[1]].view(c,-1) # [c,d*t]
-                temp = video_postive.unsqueeze(1).expand_as(pse_video)
-                vsim = torch.cosine_similarity(temp,pse_video,dim=0) #[d*t]
-                vsim = F.softmax(vsim)
-                p_v = torch.sum(vsim*pse_video,dim=1) # [c,d*t] -> [c]
-                n_v = torch.sum((1-vsim)*mask.view(-1).float()*pse_video,dim=-1)/(valid_num-1)
-                p_s = torch.cosine_similarity(video_postive,p_v,dim=0)
-                n_s = torch.cosine_similarity(video_postive,n_v,dim=0)
-                crov = (opt.global_margin + n_s - p_s).clamp(min=0) # [1]
-                crov_loss.append(crov)
-            else:
-                crov_loss.append(torch.tensor(0.).cuda())
+        #     if sim[idx[1]] > 0.9:
+        #         pse_video = videos[idx[1]].view(c,-1) # [c,d*t]
+        #         temp = video_postive.unsqueeze(1).expand_as(pse_video)
+        #         vsim = torch.cosine_similarity(temp,pse_video,dim=0) #[d*t]
+        #         vsim = F.softmax(vsim)
+        #         p_v = torch.sum(vsim*pse_video,dim=1) # [c,d*t] -> [c]
+        #         n_v = torch.sum((1-vsim)*mask.view(-1).float()*pse_video,dim=-1)/(valid_num-1)
+        #         p_s = torch.cosine_similarity(video_postive,p_v,dim=0)
+        #         n_s = torch.cosine_similarity(video_postive,n_v,dim=0)
+        #         crov = (opt.global_margin + n_s - p_s).clamp(min=0) # [1]
+        #         crov_loss.append(crov)
+        #     else:
+        #         crov_loss.append(torch.tensor(0.).cuda())
 
 
         for i in range(b):
+            # sentence1 = sentences1[i] # [c]
+            # sentence1 = sentence1.view(1,c//4,1,1).repeat(b,1,d,t) # [c] -> [b,c,d,t]
+            # score1 = torch.cosine_similarity(videos1, sentence1, dim=1).squeeze(1) # [b,1,d,t] -> [b,d,t]
+            
+            # # score1 = norm(score1)
+            # # plot_map(score1,'score1')
+            
+            # sentence2 = sentences2[i] # [c]
+            # sentence2 = sentence2.view(1,c//4,1,1).repeat(b,1,d,t) # [c] -> [b,c,d,t]
+            # score2 = torch.cosine_similarity(videos2, sentence2, dim=1).squeeze(1) # [b,1,d,t] -> [b,d,t]
+            
+            # # score2 = norm(score2)
+            # # plot_map(score2,'score2')
+            
+            # sentence3 = sentences3[i] # [c]
+            # sentence3 = sentence3.view(1,c//4,1,1).repeat(b,1,d,t) # [c] -> [b,c,d,t]
+            # score3 = torch.cosine_similarity(videos3, sentence3, dim=1).squeeze(1) # [b,1,d,t] -> [b,d,t]
+            
+            # # score3 = norm(score3)
+            # # plot_map(score3,'score3')
+            
+            # sentence4 = sentences4[i] # [c]
+            # sentence4 = sentence4.view(1,c//4,1,1).repeat(b,1,d,t) # [c] -> [b,c,d,t]
+            # score4 = torch.cosine_similarity(videos4, sentence4, dim=1).squeeze(1) # [b,1,d,t] -> [b,d,t]
+            
+            # # score4 = norm(score4)
+            # # plot_map(score4,'score4')
+            # # exit()
+            # score = (score1+score2+score3+score4)/4
+
             sentence = sentences[i] # [c]
             sentence = sentence.view(1,c,1,1).repeat(b,1,d,t) # [c] -> [b,c,d,t]
             score = torch.cosine_similarity(videos, sentence, dim=1).squeeze(1) # [b,1,d,t] -> [b,d,t]
@@ -110,6 +211,7 @@ class Contrastive(nn.Module):
             # diversity_loss:end
 
             # fb_loss_postive:start
+            # videos = videos.permute(0,3,1,2)
             # video = videos[i].view(c,d*t)
             # postive = torch.sum(temp*video,dim=-1) # [c,d*t]
             # negtive = torch.sum((1-temp)*mask.view(-1).float()*video,dim=-1)/(valid_num-1)
@@ -149,9 +251,9 @@ class Contrastive(nn.Module):
         # fb_loss = torch.log(1+torch.sum(torch.exp(0.1*fb_loss)))
         # fb_loss = LogSumExp(score, opt.lambda_lse, dim=-1)
 
-        vas_loss = torch.stack(vas_loss).mean()
+        #vas_loss = torch.stack(vas_loss).mean()
 
-        crov_loss = torch.stack(crov_loss).mean()
+        #crov_loss = torch.stack(crov_loss).mean()
 
         diagonal = scores.diag().view(scores.size(0), 1)
         d1 = diagonal.expand_as(scores)
@@ -179,11 +281,11 @@ class Contrastive(nn.Module):
         if is_training and iters % opt.log_step == 0:
             writer.add_scalar('cost_s',cost_s.sum()/b,iters)
             writer.add_scalar('cost_im',cost_im.sum()/b,iters)
-            writer.add_scalar('vas_loss',vas_loss,iters)
-            writer.add_scalar('crov_loss',crov_loss,iters)
+            #writer.add_scalar('fb_loss',fb_loss,iters)
+            #writer.add_scalar('crov_loss',crov_loss,iters)
             #writer.add_scalar('lam',lam,iters)
 
-        return cost_s.sum()/b + cost_im.sum()/b + vas_loss + crov_loss, postive_map
+        return cost_s.sum()/b + cost_im.sum()/b, postive_map
 
 
 def Criterion(videos, sentences, opt, writer, iters, is_training, lam, mask, match_map, valid_num, iou_maps):
