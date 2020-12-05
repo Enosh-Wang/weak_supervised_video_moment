@@ -5,8 +5,8 @@ import os
 import nltk
 import numpy as np
 import pandas
-import scipy.io as sio
-import skimage.measure as scikit
+# import scipy.io as sio
+# import skimage.measure as scikit
 import pickle
 
 class ActivityNet(data.Dataset):
@@ -31,7 +31,7 @@ class ActivityNet(data.Dataset):
         self.data_split=data_split
         # 数据集地址
         self.data_path=data_path
-        feature_path = os.path.join(data_path,'activitynet_n100.pkl')
+        feature_path = os.path.join(data_path,'activitynet_127.pkl')
         with open(feature_path,'rb') as f:
             self.feature = pickle.load(f)
         

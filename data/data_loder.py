@@ -1,6 +1,7 @@
 import torch
 from data.Charades import Charades,CharadesGCN,Charades_Bert
 from data.ActivityNet import ActivityNet,ActivityNetGCN
+from data.TACoS import TACoS
 from torch.utils.data import DataLoader
 import os
 import numpy as np
@@ -16,11 +17,17 @@ def get_data_loader(opt, word2vec, vocab, data_split, shuffle=True):
                                 pin_memory=True,
                                 collate_fn=collate_fn)
     elif opt.dataset == 'Charades':
-        data_loader = DataLoader(dataset=Charades_Bert(data_split, data_path, word2vec, vocab),
+        data_loader = DataLoader(dataset=Charades(data_split, data_path, word2vec, vocab),
                                 batch_size=opt.batch_size,
                                 shuffle=shuffle,
                                 pin_memory=True,
-                                collate_fn=collate_fn_bert)
+                                collate_fn=collate_fn)
+    elif opt.dataset == 'TACoS':
+        data_loader = DataLoader(dataset=TACoS(data_split, data_path, word2vec, vocab),
+                                batch_size=opt.batch_size,
+                                shuffle=shuffle,
+                                pin_memory=True,
+                                collate_fn=collate_fn)
     return data_loader
 
 def collate_fn(data):
@@ -37,7 +44,7 @@ def collate_fn(data):
     # Sort a data list by sentence length
     # 根据文本的长度对数据排序
     data.sort(key=lambda x: len(x[1]), reverse=True)
-    videos, sentences, index, video_name, word_ids, gt_map = zip(*data)
+    videos, sentences, index, video_name, word_ids = zip(*data)
     # Merge videos (convert tuple of 3D tensor to 4D tensor)
     video_lengths = [len(video) for video in videos]
 
@@ -55,7 +62,7 @@ def collate_fn(data):
         sentence_padded[i, :end] = sentence[:end]
         word_id_padded[i, :end] = word_id[:end]
     # 依次是一个batch的视频、padding后的文本，文本的单词数目，视频的滑窗数目，pair的序号
-    return video_padded, sentence_padded, sentence_lengths, index ,video_name, word_id_padded, torch.stack(gt_map)
+    return video_padded, sentence_padded, sentence_lengths, index, word_id_padded
 
 def get_data_loader_GCN(opt, word2vec, data_split, shuffle=True):
     """Returns torch.utils.data.DataLoader for  dataset."""

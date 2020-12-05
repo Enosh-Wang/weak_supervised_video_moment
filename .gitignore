@@ -1,9 +1,8 @@
-nohup.out
-test.py
+*.out
 __pycache__/
 .vscode/
-runs/*
-output/
 img/
+output/
+runs/*
 vocab/
 BMN_best.pth.tar
