@@ -29,6 +29,25 @@ def get_match_map(tscale, start_ratio, end_ratio):
     match_map = np.reshape(match_map, [-1, 2])  # [0,2] [1,3] [2,4].....[99,101]   # duration x start
     return match_map  # duration is same in row, start is same in col
 
+def get_window_list(layer_num,kenerl_size,stride,t_scale):
+
+    # first layer
+    r = 1 # receptive field
+    l = t_scale # feature length
+    s = stride
+    k = kenerl_size
+    window_list = []
+    for i in range(layer_num):
+        r = r+(k-1)*(s**i)
+        l = (l-k)//s+1
+        s_i = s**(i+1)
+        for j in range(l):
+            xmin = s_i*j
+            xmax = r + s_i*j
+            window_list.append([xmin,xmax])
+    window_list = np.asarray(window_list)/t_scale
+    return window_list
+
 def iou_with_anchors(anchors_min, anchors_max, box_min, box_max):
     """Compute jaccard score between a box and the anchors.
     """
@@ -66,7 +85,15 @@ def get_iou_map(tscale, start_ratio, end_ratio, match_map, mask):
     
     return np.stack(map_buffer)
 
+def get_iou_list(window_list):
+    
+    map_buffer = []
 
+    for i in range(len(window_list)):
+        iou_map = iou_with_anchors(window_list[:,0],window_list[:,1],window_list[i,0],window_list[i,1])
+        map_buffer.append(iou_map)
+    
+    return np.stack(map_buffer)
 
 
 def l1norm(X, dim, eps=1e-8):

@@ -1,24 +1,69 @@
 import os
 import numpy as np
-from sklearn.decomposition import PCA
+# from sklearn.decomposition import PCA
 import matplotlib
 matplotlib.use('agg')
 import matplotlib.pyplot as plt
 
-def plot_map(score_maps, index, model_name):
+def plot_mdmap(matrix,offset,mask):
+    path = os.path.join('img_offset')
+    k_size = int(offset.size(1)/2)
+    
+    f = plt.figure(figsize=(6,4))
+    cmap = plt.get_cmap('Oranges')
+    b,c,d,t = offset.size()
+
+    matrix = matrix.detach().cpu().numpy()
+    offset = offset.detach().cpu().numpy()
+    mask = mask.detach().cpu().numpy()
+    if k_size == 9:
+        x_list = [-1,0,1,-1,0,1,-1,0,1]
+        y_list = [-1,-1,-1,0,0,0,1,1,1]
+    elif k_size == 1:
+        x_list = [0]
+        y_list = [0]
+    for i in range(b):
+        for idx in range(d):
+            for jdx in range(t):
+                plt.matshow(np.max(matrix[i],axis = 0),cmap = cmap)
+                plt.colorbar()
+                plt.scatter(jdx,idx,color='black',marker='o')
+                for c in range(k_size):
+                    x = jdx + x_list[c] + offset[i][c][idx][jdx]
+                    y = idx + y_list[c] + offset[i][c+k_size][idx][jdx]
+                    plt.scatter(x,y,color='blue',marker='o',alpha=mask[i,c,idx,jdx])
+
+                sub_path = os.path.join(path,str(i))
+                if not os.path.exists(sub_path):
+                    os.makedirs(sub_path)
+                plt.savefig(os.path.join(sub_path,str(idx)+'_'+str(jdx)+'.png'))
+                plt.clf()
+    
+    plt.close(f)
+    exit()
+
+
+def plot_map(score_maps, index, opt):
     # 可视化保存路径
-    path = os.path.join('img',model_name)
+    path = os.path.join('img',opt.model_name)
     if not os.path.exists(path):
         os.makedirs(path)
     
     batch_size = score_maps.shape[0]
+
     for i in range(batch_size):
         score_map = score_maps[i]
         f = plt.figure(figsize=(6,4))
-        plt.matshow(score_map, cmap = plt.cm.cool)
-        plt.ylabel("duration")
-        plt.xlabel("start time")
-        plt.colorbar()
+        l = opt.temporal_scale # feature length
+        s = opt.stride
+        k = opt.kernel_size
+        start = 0
+        end = 0
+        for j in range(opt.layers):
+            l = (l-k)//s+1
+            end = start + l
+            plt.plot(list(range(l)),score_map[start:end])
+            start = end
         plt.savefig(os.path.join(path,str(index[i])+'.png'))
         plt.close(f)
         
