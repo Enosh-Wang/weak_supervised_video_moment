@@ -111,17 +111,22 @@ class Criterion(nn.Module):
             word = word.unsqueeze(0).repeat(b,1,1) # [l,c] -> [b,l,c]
             w_mask = w_mask.unsqueeze(0).repeat(b,1)
             score = []
+            max_score = []
             v_tmp = video.clone()
             for layer in self.conv:
                 v_tmp = layer(v_tmp, word, w_mask)
-                score.append(self.conv_1d(v_tmp).sigmoid().squeeze(1)) # [b,l]
+                layer_score = self.conv_1d(v_tmp).sigmoid().squeeze(1) # [b,l]
+                score.append(layer_score)
+                max_score.append(torch.max(layer_score,dim=1,keepdim=True)[0])
             
             score = torch.cat(score,dim=1)
+            max_score = torch.cat(max_score,dim=1)
             postive_map.append(score[i])
 
             # negative_loss.append(neg_score)
-            score = get_video_score_nms_list(score,lam,iou_maps,i)
-            score_map.append(score)
+            # score = get_video_score_nms_list(score,lam,iou_maps,i)
+            # score_map.append(score)
+            score_map.append(torch.mean(max_score,dim=1))
 
         # negative_loss = torch.stack(negative_loss).mean()
         postive_map = torch.stack(postive_map) # [b,l]
