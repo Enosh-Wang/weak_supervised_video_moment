@@ -35,6 +35,6 @@ class Model(nn.Module):
         sentences, words, w_mask= self.GRU(words,w_len) # -> [b,c]
 
         # 创建正负样本对，模态交互
-        triplet_loss, postive= self.loss(videos,words,w_mask,writer,iters,lam,self.iou_map)
+        triplet_loss, postive= self.loss(videos,words,w_mask,sentences,writer,iters,lam)#,self.iou_map)
 
         return postive, triplet_loss
