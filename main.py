@@ -3,6 +3,8 @@ import logging
 import argparse
 from models.runner import Runner
 from tools.vocab import Vocabulary
+from easydict import EasyDict as edict
+import yaml
 # 从vsepp拷贝的，改写成charades
 def parse_args():
     '''Hyper Parameters'''
@@ -93,15 +95,70 @@ def parse_args():
     args = parser.parse_args()
     return args
 
+
+
+def _merge_a_into_b(a, b):
+    """Merge config dictionary a into config dictionary b, clobbering the
+    options in b whenever they are also specified in a.
+    """
+    # 必须为edict对象
+    if type(a) is not edict:
+        return
+
+    for k, v in a.items():
+        # a must specify keys that are in b
+        # a中的参数必须是b中有的
+        if k not in b:
+            raise KeyError('{} is not a valid config key'.format(k))
+
+        # the types must match, too
+        # 对应参数的类型必须相同
+        old_type = type(getattr(b,k))
+        if old_type is not type(v):
+            if isinstance(getattr(b,k), np.ndarray):
+                v = np.array(v, dtype=getattr(b,k).dtype)
+            else:
+                raise ValueError(('Type mismatch ({} vs. {}) ' 
+                                'for config key: {}').format(type(getattr(b,k),type(v), k)))
+
+        # recursively merge dicts
+        if type(v) is edict:
+            try:
+                # 如果参数同样是edict字典，则递归调用
+                _merge_a_into_b(a[k], getattr(b,k))
+            except:
+                print(('Error under config key: {}'.format(k)))
+                raise
+        else:
+            # 覆盖b中的值
+            setattr(b,k,v)
+
+def cfg_from_file(dataset,opt):
+    """Load a config file and merge it into the default options."""
+    # 从yaml文件中读取参数，并覆盖默认参数
+    if dataset == 'Charades':
+        filename = 'data/Charades.yml'
+    elif dataset == 'TACoS':
+        filename = 'data/TACoS.yml'
+    elif dataset == 'ActivityNet':
+        filename = 'data/ActivityNet.yml'
+
+    with open(filename, 'r') as f:
+        yaml_cfg = edict(yaml.load(f))
+
+    _merge_a_into_b(yaml_cfg, opt)
+    
+
 if __name__ == '__main__':
     # os.environ["CUDA_VISIBLE_DEVICES"] = "3"
     opt = parse_args()
     logging.basicConfig(format='%(asctime)s %(message)s', level=logging.INFO)
-
+    opt.dataset = 'Charades'
+    opt.model_name = 'cam'
+    cfg_from_file(opt.dataset,opt)
 
     print(opt)
-    train_runner = Runner(opt,is_training = True)
-    train_runner.train()
+    # train_runner = Runner(opt,is_training = True)
+    # train_runner.train()
     test_runner = Runner(opt, is_training = False)
     test_runner.test(os.path.join(opt.model_path,opt.model_name))
-

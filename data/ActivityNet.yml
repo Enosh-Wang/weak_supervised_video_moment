@@ -1,0 +1,5 @@
+temporal_scale: 127
+video_dim: 500
+layers: 3
+dataset: ActivityNet
+batch_size: 32
