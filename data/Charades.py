@@ -10,7 +10,7 @@ import skimage.measure as scikit
 import pickle
 import json
 from tools.util import get_match_map, iou_with_anchors, get_mask, get_mask_spare
-from transformers import BertTokenizer
+#from transformers import BertTokenizer
 
 class Charades(data.Dataset):
     """
@@ -57,19 +57,7 @@ class Charades(data.Dataset):
         sentence = torch.Tensor(sentence)
         word_id = torch.Tensor(word_id)
 
-        tmp_start = max(min(1, self.start_time[index] / self.duration[index]), 0)
-        tmp_end = max(min(1, self.end_time[index] / self.duration[index]), 0)
-
-        match_map = get_match_map(20,0,0.5)
-        mask = get_mask(20,0,0.5)
-
-        tmp_gt_iou_map = iou_with_anchors(match_map[:, 0], match_map[:, 1], tmp_start, tmp_end)
-
-        tmp_gt_iou_map = np.reshape(tmp_gt_iou_map, [-1, 20])
-        
-        gt_map = torch.Tensor(tmp_gt_iou_map*mask)
-
-        return video, sentence, index, video_name, word_id, gt_map
+        return video, sentence, index, video_name, word_id
 
     def __len__(self):
         # 长度按照句子数量，其实就是pair的数量

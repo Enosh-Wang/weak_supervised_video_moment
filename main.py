@@ -85,17 +85,23 @@ def parse_args():
                         help='full_IMRAM|text_IMRAM')
     parser.add_argument('--iteration_step', default=3, type=int,
                         help='routing_step')
+    parser.add_argument('--dilation_rate', default=1, type=int)
+    parser.add_argument('--map_layers', default=1, type=int)
+    parser.add_argument('--kernel_size', default=3, type=int)
     args = parser.parse_args()
     return args
 
 if __name__ == '__main__':
-    #os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+    # os.environ["CUDA_VISIBLE_DEVICES"] = "3"
     opt = parse_args()
     print(opt)
     logging.basicConfig(format='%(asctime)s %(message)s', level=logging.INFO)
 
-    train_runner = Runner(opt,is_training = True)
-    train_runner.train()
+    # for i in range(3,5):
+    #     opt.dilation_rate = i
+    #     opt.model_name = 'dilate_activity_' + str(i)
+    # train_runner = Runner(opt,is_training = True)
+    # train_runner.train()
     test_runner = Runner(opt, is_training = False)
     test_runner.test(os.path.join(opt.model_path,opt.model_name))
 

@@ -295,12 +295,15 @@ def Criterion(videos, sentences, opt, writer, iters, is_training, lam, mask, mat
     postive_map = []
     score_map = []
     cmil_loss = []
+    postive_loss = []
+    negative_loss = []
 
     for i in range(b):
         sentence = sentences[i] # [c]
+        global_sentence = sentence.view(1,c).repeat(b,1)
         sentence = sentence.view(1,c,1,1).repeat(b,1,d,t) # [c] -> [b,c,d,t]
         score = torch.cosine_similarity(videos, sentence, dim=1).squeeze(1) # [b,1,d,t] -> [b,d,t]
-
+        # global_score = torch.cosine_similarity(global_sentence, global_video, dim=1)
 
         # score = score.view(b,-1)
         # score_min = torch.min(score, dim = -1, keepdim = True)[0]
@@ -312,19 +315,26 @@ def Criterion(videos, sentences, opt, writer, iters, is_training, lam, mask, mat
         
         score = score.masked_fill(mask == 0, float('-inf'))
         postive_map.append(score[i]) #[d,t]
-
+        plot_map(score,'hold_video')
+        exit()
         score = score.view(b,-1)
         orders = torch.argsort(score, dim=1, descending=True)[:,:valid_num].detach().cpu().numpy()
         #score = F.softmax(score*opt.lambda_softmax,dim=-1)
         
         #score = LogSumExp(score, opt.lambda_lse, dim=-1) # [b,d*t] -> [b]
 
-        score = get_video_score_nms(score, lam, iou_maps, orders)
+        score,neg_score,p_loss,n_loss = get_video_score_nms(score, lam, iou_maps, orders)
 
-        #cmil_loss.append(temp_loss)    
+
+        postive_loss.append(p_loss[i])
+        negative_loss.append(n_loss[i])
+        cmil_loss.append((opt.global_margin + neg_score[i] - score[i]).clamp(min=0).mean())
+        # score = score + global_score    
         score_map.append(score)
 
-    #cmil_loss = torch.stack(cmil_loss).mean()
+    postive_loss = torch.stack(postive_loss).mean()
+    negative_loss = torch.stack(negative_loss).mean()
+    cmil_loss = torch.stack(cmil_loss).mean()
     postive_map = torch.stack(postive_map) # [b,d,t]
     scores = torch.stack(score_map) # [b,b]
 
@@ -354,10 +364,11 @@ def Criterion(videos, sentences, opt, writer, iters, is_training, lam, mask, mat
     if is_training and iters % opt.log_step == 0:
         writer.add_scalar('cost_s',cost_s.sum()/b,iters)
         writer.add_scalar('cost_im',cost_im.sum()/b,iters)
-        #writer.add_scalar('cmil_loss',cmil_loss,iters)
-        #writer.add_scalar('lam',lam,iters)
+        writer.add_scalar('cmil_loss',cmil_loss,iters)
+        writer.add_scalar('postive_loss',postive_loss,iters)
+        writer.add_scalar('negative_loss',negative_loss,iters)
 
-    return cost_s.sum()/b + cost_im.sum()/b , postive_map
+    return cost_s.sum()/b + cost_im.sum()/b + cmil_loss + postive_loss + negative_loss, postive_map
 
 
 def Criterion1(videos, sentences, opt, writer, iters, is_training, max_iter, mask, match_map, valid_num):

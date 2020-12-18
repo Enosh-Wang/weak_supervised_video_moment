@@ -16,13 +16,15 @@ def get_lambda(iters, max_iter, continuation_func): # 原版函数应当是适�
 		lam = np.exp((iters-max_iter)/4) #2000
 	return lam
 
-def get_video_score_nms(scores, lam, iou_maps, orders):
+def get_video_score_nms( scores, lam, iou_maps, orders):
     
     #score [b,d*t] mask [d*t]
 	video_score = []
-	loss = []
+	neg_score = []
+	p_loss = []
+	n_loss = []
 	#orders = torch.argsort(scores, dim=1, descending=True)[:,:valid_num].detach().cpu().numpy()
-
+	
 	for i in range(scores.size(0)):
 		order = orders[i]
 			
@@ -30,19 +32,34 @@ def get_video_score_nms(scores, lam, iou_maps, orders):
 
 		iou_map = iou_maps[index,order]
 		inds = np.where(iou_map >= lam)[0]
-		
+
 		temp = scores[i,order[inds]]
-		# top = temp[0]
-		# top = top.expand_as(temp)
-		# loss.append(torch.sum((top - temp)*torch.Tensor(iou_map[inds]).cuda()))
+
+		max_score = temp[0]
+		max_score = max_score.expand_as(temp)
+		
+		p_loss.append((max_score-temp).mean())
+
+		# weight = torch.Tensor(iou_map[inds]).cuda()
+		# weight = 2 - weight
+		# label = (weight > 0.7).float() - (weight > 0.9).float()
+		# label = label*0.2 + 1
+		video_score.append(torch.mean(temp))
+
+		neg_inds = np.where(iou_map < lam)[0]
+		if len(neg_inds) == 0:
+			neg_score.append(torch.tensor(0.).cuda()) 
+			n_loss.append(torch.tensor(0.).cuda())
+		else:
+			neg_temp = scores[i,order[neg_inds]]
+			neg_score.append(torch.mean(neg_temp))	
+			min_score = neg_temp[-1]
+			min_score = min_score.expand_as(neg_temp)
+			n_loss.append((neg_temp-min_score).mean())
 
 
-		sub_score = torch.sum(temp)/inds.size
-
-		video_score.append(sub_score)
-
-	return torch.stack(video_score)#torch.stack(loss).mean()
-
+	return torch.stack(video_score),torch.stack(neg_score),torch.stack(p_loss),torch.stack(n_loss)
+	
 def get_video_score_nms_all(scores, lam, iou_maps, orders):
     # 完整版CMIL
     #score [b,d*t] mask [d*t]
@@ -72,7 +89,6 @@ def get_video_score_nms_all(scores, lam, iou_maps, orders):
 
 	return torch.stack(video_score)
 
-	
 
 
 
