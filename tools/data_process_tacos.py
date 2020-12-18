@@ -72,6 +72,7 @@ if __name__ == "__main__":
         feats = value
         # 把视频采样成100个点，每个点处的值又3个采样点取均值算得
         videoFeature_mean,feat_length=poolData(feats,num_prop=255,num_bin=1,num_sample_bin=3,pool_type="mean")
+
         length += feat_length
         num += 1
         video_list.append(video)

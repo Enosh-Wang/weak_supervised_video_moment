@@ -8,25 +8,8 @@ import matplotlib
 matplotlib.use('agg')
 import matplotlib.pyplot as plt
 
-def plot_map(score_maps, name):
-    # 可视化保存路径
-    path = os.path.join(name)
-    if not os.path.exists(path):
-        os.makedirs(path)
-    
-    batch_size = score_maps.shape[0]
-    channel_size = score_maps.shape[1]
-    f = plt.figure(figsize=(6,4))
-    for i in range(1):
-        for j in range(channel_size):
-            score_map = score_maps[i,j]
-            plt.matshow(score_map, cmap = plt.cm.cool)
-            plt.ylabel("duration")
-            plt.xlabel("start time")
-            plt.colorbar()
-            plt.savefig(os.path.join(path,str(i)+'_'+str(j)+'.png'))
-            plt.clf()
-    plt.close(f)
+import inspect
+from gpu_mem_track import  MemTracker
 
 def plot_map(score_maps, name):
     # 可视化保存路径
@@ -83,10 +66,9 @@ class scdm1(nn.Module):
         video = gama*video+deta
         # plot_map(video.permute(0,2,1).view(b,c,d,t).contiguous().cpu().detach().numpy(),'video_modu')
         video = video.permute(0,2,1).view(b,c,d,t)
-        # exit()
         return video
 
-class scdm(nn.Module):
+class se(nn.Module):
     def __init__(self,opt):
         super().__init__()
 
@@ -111,5 +93,4 @@ class scdm(nn.Module):
         ch_attn = torch.tanh(self.fc(w_global.squeeze())).view(b,c,1,1) # [b,c]
         video = self.bn1(video)
         video = video*ch_attn
-
         return video

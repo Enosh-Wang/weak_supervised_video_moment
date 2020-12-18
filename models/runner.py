@@ -43,9 +43,10 @@ class Runner(object):
     def train(self):
         # Load data loaders
         # 加载数据集
+
         train_loader = get_data_loader(self.opt, self.word2vec, self.vocab, 'train', True)
         val_loader = get_data_loader(self.opt, self.word2vec, self.vocab, 'val', True)
-        
+
         # optionally resume from a checkpoint
         if self.opt.resume:
             self.load_model()
@@ -57,6 +58,7 @@ class Runner(object):
 
             # evaluate on validation set
             recall = self.validate(val_loader, lam)
+    
             self.scheduler.step()
             # remember best R@ sum and save checkpoint
             is_best = recall > self.max_recall
@@ -88,9 +90,9 @@ class Runner(object):
             if torch.cuda.is_available():
                 videos = videos.cuda()
                 sentences = sentences.cuda()
-            
-            _,loss = self.model.forward(videos, sentences, sentence_lengths, self.logger, self.iters, lam)
-            
+
+            _,loss = self.model.forward(videos, sentences, sentence_lengths, word_ids, self.logger, self.iters, lam)
+ 
             self.optimizer.zero_grad()
             # compute gradient and do SGD step
             loss.backward()
@@ -135,7 +137,8 @@ class Runner(object):
                 sentences = sentences.cuda()
             # compute the embeddings
             with torch.no_grad():
-                confidence_map,loss = self.model.forward(videos, sentences, sentence_lengths, self.logger, self.iters, lam)
+
+                confidence_map,loss = self.model.forward(videos, sentences, sentence_lengths, word_ids, self.logger, self.iters, lam)
             
             confidence_map = confidence_map.detach().cpu().numpy()
             batch_result = self.generate_proposal(confidence_map, index)
@@ -250,7 +253,8 @@ class Runner(object):
             # compute the embeddings
             with torch.no_grad():
                 self.iters += 1
-                confidence_map,loss = self.model.forward(videos, sentences, sentence_lengths, self.logger, self.iters, lam)
+
+                confidence_map,loss = self.model.forward(videos, sentences, sentence_lengths, word_ids, self.logger, self.iters, lam)
 
             confidence_map = confidence_map.detach().cpu().numpy()
             plot_map(confidence_map,index,self.opt.model_name)

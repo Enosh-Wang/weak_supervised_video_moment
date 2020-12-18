@@ -103,6 +103,19 @@ class BMN(nn.Module):
             nn.ReLU(inplace=True)
         )
         
+        k = opt.kernel_size
+        l = opt.map_layers
+
+        mask_kernel = torch.ones(1,1,k,k).cuda()
+        first_padding = (k - 1) * l // 2
+
+        self.weights = [
+            mask2weight(v_mask, mask_kernel, padding=first_padding) 
+        ]
+        self.conv_map = nn.ModuleList(
+            [nn.Conv2d(opt.joint_dim, opt.joint_dim, k, padding=first_padding)]
+        )
+        
         # k = opt.kernel_size
         # l = opt.map_layers
 
@@ -121,6 +134,11 @@ class BMN(nn.Module):
         #     self.conv_map.append(nn.Conv2d(opt.joint_dim, opt.joint_dim, k))
         
 
+        for _ in range(l - 1):
+            self.weights.append(mask2weight(self.weights[-1] > 0, mask_kernel))
+            self.conv_map.append(nn.Conv2d(opt.joint_dim, opt.joint_dim, k))
+        
+
         for m in self.modules():
             if isinstance(m, (nn.Conv1d,nn.Conv2d,nn.Conv3d)):
                 nn.init.kaiming_normal_(m.weight, nonlinearity='relu') # 卷积层参数初始化
@@ -131,26 +149,25 @@ class BMN(nn.Module):
 
         # self.mdc = ModulatedDeformConvPack(self.hidden_dim_2d,self.opt.joint_dim,kernel_size=3,stride=1,padding=1)
 
-    def forward(self, video, v_mask):
-        # 转换维度，维度在前，帧数在后 [b,c,t]
+    def forward(self, video, words, sentences, v_mask, w_mask):
+        # 转换维度，维度在前，帧数在后 [b,c,t] sentence [b,c]
         video = video.transpose(1,2)
 
         v_map = self.conv_1d(video)
-        batch_size = v_map.size(0) 
-
         v_map = self._boundary_matching_layer(v_map)
-        v_map = self.conv_3d(v_map).squeeze() # -> [b,c,d,t]
+        v_map = self.conv_3d(v_map).squeeze(2) # -> [b,c,d,t]
         
+        batch_size = v_map.size(0)
         center = self.center.repeat(batch_size,1,1,1)
         length = self.length.repeat(batch_size,1,1,1)
         v_map = torch.cat([v_map,center,length],dim=1)
         # plot_map(v_map.cpu().detach().numpy(),'pe')
         v_map = self.conv_2d(v_map)*v_mask.float()
         # plot_map(v_map.cpu().detach().numpy(),'pe_conv')
-        # for layer, weight in zip(self.conv_map, self.weights):
-        #     v_map = layer(v_map).relu() * weight
-        #     # plot_map((v_map*v_mask.float()).cpu().detach().numpy(),'scdm_weight_mask')
-        #     # exit()
+        for layer, weight in zip(self.conv_map, self.weights):
+            v_map = layer(v_map).relu() * weight
+            # plot_map((v_map*v_mask.float()).cpu().detach().numpy(),'scdm_weight_mask')
+            # exit()
         return v_map
 
     def get_pmap(self, match_map):

@@ -25,7 +25,6 @@ class Model(nn.Module):
         self.opt = opt
         self.vocab = vocab
         self.GRU = TextEncoderGRU(opt)
-        
         self.v_mask = torch.IntTensor(get_mask(opt.temporal_scale,opt.start_ratio,opt.end_ratio)).cuda()#.view(1,-1)
         self.valid_num = torch.sum(self.v_mask)
         self.match_map = get_match_map(opt.temporal_scale,opt.start_ratio,opt.end_ratio)
@@ -44,6 +43,27 @@ class Model(nn.Module):
         # 创建正负样本对，模态交互
         triplet_loss, postive= self.loss(v_map,words,w_mask,writer,iters,lam,self.v_mask,self.valid_num, self.iou_map)
 
+        # if self.training and iters % self.opt.log_step == 0:
+        #     writer.add_scalar('self_loss',loss,iters)
+        self.v_mask = torch.IntTensor(get_mask(opt.temporal_scale,opt.start_ratio,opt.end_ratio)).cuda()#.view(1,-1)
+        self.valid_num = torch.sum(self.v_mask)
+        self.match_map = get_match_map(opt.temporal_scale,opt.start_ratio,opt.end_ratio)
+        self.iou_map = get_iou_map(opt.temporal_scale,opt.start_ratio,opt.end_ratio,self.match_map,self.v_mask.view(1,-1).cpu().numpy())
+        self.bmn = BMN(opt, self.match_map,self.v_mask.float())
+        self.loss = Criterion(opt,self.v_mask)
+
+    def forward(self, videos, words, w_len, writer, iters, lam):
+
+        # 文本特征提取
+        sentences, words, w_mask= self.GRU(words,w_len) # -> [b,c]
+
+        # 视频特征提取
+        v_map = self.bmn(videos, self.v_mask) # -> [b,c,d,t]
+        
+        # 创建正负样本对，模态交互
+        triplet_loss, postive= self.loss(v_map,words,w_mask,writer,iters,lam,self.v_mask,self.valid_num, self.iou_map)
+
+    
         # if self.training and iters % self.opt.log_step == 0:
         #     writer.add_scalar('self_loss',loss,iters)
 
