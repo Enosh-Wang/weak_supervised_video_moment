@@ -132,16 +132,15 @@ class BMN(nn.Module):
 
         # self.mdc = ModulatedDeformConvPack(self.hidden_dim_2d,self.opt.joint_dim,kernel_size=3,stride=1,padding=1)
 
-    def forward(self, video, v_mask):
-        # 转换维度，维度在前，帧数在后 [b,c,t]
+    def forward(self, video, words, sentences, v_mask, w_mask):
+        # 转换维度，维度在前，帧数在后 [b,c,t] sentence [b,c]
         video = video.transpose(1,2)
 
         v_map = self.conv_1d(video)
-        batch_size = v_map.size(0) 
-
         v_map = self._boundary_matching_layer(v_map)
-        v_map = self.conv_3d(v_map).squeeze() # -> [b,c,d,t]
+        v_map = self.conv_3d(v_map).squeeze(2) # -> [b,c,d,t]
         
+        batch_size = v_map.size(0)
         center = self.center.repeat(batch_size,1,1,1)
         length = self.length.repeat(batch_size,1,1,1)
         v_map = torch.cat([v_map,center,length],dim=1)
