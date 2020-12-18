@@ -41,7 +41,7 @@ class mapping(nn.Module):
     def forward(self, v_map, v_mask, words, w_mask):
         v_map = self.modulation(v_map,v_mask,words,w_mask)
         # plot_map(v_map.cpu().detach().numpy(),'scdm')
-        v_map = self.conv(v_map).relu(inplace=True)
+        v_map = self.conv(v_map).relu()
         # plot_map(v_map.cpu().detach().numpy(),'scdm_conv')
         
         return v_map

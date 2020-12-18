@@ -86,14 +86,15 @@ class Criterion(nn.Module):
             w_mask = w_masks[i]
             word = word.unsqueeze(0).repeat(b,1,1) # [l,c] -> [b,l,c]
             w_mask = w_mask.unsqueeze(0).repeat(b,1)
+            temp = v_map.clone()
             for layer, weight in zip(self.conv_map, self.weights):
-                v_map = layer(v_map,v_mask, word, w_mask) * weight
+                temp = layer(temp,v_mask, word, w_mask) #* weight
             
-            score = self.conv_2d(v_map).sigmoid().squeeze(1) # [b,d,t]
+            score = self.conv_2d(temp).sigmoid().squeeze(1) # [b,d,t]
 
             score = score.masked_fill(v_mask == 0, float('-inf'))
             postive_map.append(score[i]) #[d,t]
-            # plot_map(score,'tacos')
+            # plot_map(score,'se_new_nonorm')
             # exit()
             score = score.view(b,-1)
             score,neg_score = get_video_score_nms(score, valid_num, lam, iou_maps, i)
@@ -125,8 +126,9 @@ class Criterion(nn.Module):
 
         # keep the maximum violating negative for each query
         if self.opt.max_violation:
-            cost_s = cost_s.max(1)[0]
-            cost_im = cost_im.max(0)[0]
+            num = self.opt.neg_num
+            cost_s = cost_s.sort(1,descending=True)[0][:,:num]
+            cost_im = cost_im.sort(0,descending=True)[0][:num,:]
         
         if self.training and iters % self.opt.log_step == 0:
             writer.add_scalar('cost_s',cost_s.sum()/b,iters)

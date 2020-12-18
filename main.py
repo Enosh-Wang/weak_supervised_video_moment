@@ -88,6 +88,7 @@ def parse_args():
     parser.add_argument('--dilation_rate', default=1, type=int)
     parser.add_argument('--map_layers', default=1, type=int)
     parser.add_argument('--kernel_size', default=3, type=int)
+    parser.add_argument('--neg_num', default=3, type=int)
     args = parser.parse_args()
     return args
 
@@ -97,11 +98,8 @@ if __name__ == '__main__':
     print(opt)
     logging.basicConfig(format='%(asctime)s %(message)s', level=logging.INFO)
 
-    for i in range(1,10,2):
-        opt.kernel_size = i
-        opt.model_name = 'kernel_' + str(opt.kernel_size)
-        train_runner = Runner(opt,is_training = True)
-        train_runner.train()
-        test_runner = Runner(opt, is_training = False)
-        test_runner.test(os.path.join(opt.model_path,opt.model_name))
+    train_runner = Runner(opt,is_training = True)
+    train_runner.train()
+    test_runner = Runner(opt, is_training = False)
+    test_runner.test(os.path.join(opt.model_path,opt.model_name))
 

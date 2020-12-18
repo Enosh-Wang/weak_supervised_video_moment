@@ -5,8 +5,6 @@ import os
 import nltk
 import numpy as np
 import pandas
-import scipy.io as sio
-# import skimage.measure as scikit
 import pickle
 
 class ActivityNet(data.Dataset):
