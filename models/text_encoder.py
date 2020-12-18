@@ -5,6 +5,7 @@ from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from tools.util import PositionalEncoding,multihead_mask,l2norm
 from models.graph_convolution import GraphConvolution
 #from transformers import BertModel, BertConfig
+<<<<<<< HEAD
 import os
 import numpy as np
 import matplotlib
@@ -28,6 +29,8 @@ def plot_map(score_maps, name):
         plt.savefig(os.path.join(path,str(i)+'.png'))
         plt.clf()
     plt.close(f)
+=======
+>>>>>>> b39d49fd1a7336ed7eb4478e38a14def76ad2247
 
 class TextEncoderMulti(nn.Module):
 

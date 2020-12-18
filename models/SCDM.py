@@ -8,6 +8,7 @@ import matplotlib
 matplotlib.use('agg')
 import matplotlib.pyplot as plt
 
+<<<<<<< HEAD
 import inspect
 from gpu_mem_track import  MemTracker
 
@@ -31,6 +32,8 @@ def plot_map(score_maps, name):
             plt.clf()
     plt.close(f)
 
+=======
+>>>>>>> b39d49fd1a7336ed7eb4478e38a14def76ad2247
 def plot_map(score_maps, name):
     # 可视化保存路径
     path = os.path.join(name)
@@ -77,17 +80,28 @@ class scdm(nn.Module):
         deta = torch.tanh(self.de(sentence))
         # plot_map(gama.permute(0,2,1).view(b,c,d,t).contiguous().cpu().detach().numpy(),'gama')
         # plot_map(deta.permute(0,2,1).view(b,c,d,t).contiguous().cpu().detach().numpy(),'deta')
+<<<<<<< HEAD
         gpu_tracker.track()
+=======
+
+>>>>>>> b39d49fd1a7336ed7eb4478e38a14def76ad2247
         mean = torch.mean(video,dim=(1,2),keepdim=True)
         var = torch.var(video,dim=(1,2),keepdim=True) + 1e-6
         # plot_map(mean.unsqueeze(1).cpu().detach().numpy(),'mean')
         # plot_map(var.unsqueeze(1).cpu().detach().numpy(),'var')
+<<<<<<< HEAD
         gpu_tracker.track()
+=======
+
+>>>>>>> b39d49fd1a7336ed7eb4478e38a14def76ad2247
         video = (video-mean)/var
         # plot_map(video.permute(0,2,1).view(b,c,d,t).contiguous().cpu().detach().numpy(),'video_norm')
         video = gama*video+deta
         # plot_map(video.permute(0,2,1).view(b,c,d,t).contiguous().cpu().detach().numpy(),'video_modu')
         video = video.permute(0,2,1).view(b,c,d,t)
+<<<<<<< HEAD
         gpu_tracker.track()
+=======
+>>>>>>> b39d49fd1a7336ed7eb4478e38a14def76ad2247
         # exit()
         return video

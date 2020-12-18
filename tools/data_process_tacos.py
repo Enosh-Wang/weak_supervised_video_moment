@@ -71,7 +71,11 @@ if __name__ == "__main__":
         video = key
         feats = value
         # 把视频采样成100个点，每个点处的值又3个采样点取均值算得
+<<<<<<< HEAD
         videoFeature_mean,feat_length=poolData(feats,num_prop=255,num_bin=1,num_sample_bin=3,pool_type="mean")
+=======
+        videoFeature_mean,feat_length=poolData(feats,num_prop=128,num_bin=1,num_sample_bin=3,pool_type="mean")
+>>>>>>> b39d49fd1a7336ed7eb4478e38a14def76ad2247
         length += feat_length
         num += 1
         video_list.append(video)
@@ -79,5 +83,9 @@ if __name__ == "__main__":
     print('average_length:',length/num)
     data = dict(zip(video_list,feats_list))
     # 保存新的特征
+<<<<<<< HEAD
     with open(os.path.join(datapath,'tacos_255.pkl'),'wb') as f:
+=======
+    with open(os.path.join(datapath,'tacos_128.pkl'),'wb') as f:
+>>>>>>> b39d49fd1a7336ed7eb4478e38a14def76ad2247
         pickle.dump(data,f)

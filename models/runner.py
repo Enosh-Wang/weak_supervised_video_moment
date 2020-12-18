@@ -101,8 +101,13 @@ class Runner(object):
                 videos = videos.cuda()
                 sentences = sentences.cuda()
 
+<<<<<<< HEAD
             _,loss = self.model.forward(videos, sentences, sentence_lengths, self.logger, self.iters, lam)
 
+=======
+            _,loss = self.model.forward(videos, sentences, sentence_lengths, word_ids, self.logger, self.iters, lam)
+ 
+>>>>>>> b39d49fd1a7336ed7eb4478e38a14def76ad2247
             self.optimizer.zero_grad()
             # compute gradient and do SGD step
             loss.backward()
@@ -146,7 +151,11 @@ class Runner(object):
                 sentences = sentences.cuda()
             # compute the embeddings
             with torch.no_grad():
+<<<<<<< HEAD
                 confidence_map,loss = self.model.forward(videos, sentences, sentence_lengths, self.logger, self.iters, lam)
+=======
+                confidence_map,loss = self.model.forward(videos, sentences, sentence_lengths, word_ids, self.logger, self.iters, lam)
+>>>>>>> b39d49fd1a7336ed7eb4478e38a14def76ad2247
             
             confidence_map = confidence_map.detach().cpu().numpy()
             batch_result = self.generate_proposal(confidence_map, index)
@@ -261,7 +270,11 @@ class Runner(object):
             # compute the embeddings
             with torch.no_grad():
                 self.iters += 1
+<<<<<<< HEAD
                 confidence_map,loss = self.model.forward(videos, sentences, sentence_lengths, self.logger, self.iters, lam)
+=======
+                confidence_map,loss = self.model.forward(videos, sentences, sentence_lengths, word_ids, self.logger, self.iters, lam)
+>>>>>>> b39d49fd1a7336ed7eb4478e38a14def76ad2247
 
             confidence_map = confidence_map.detach().cpu().numpy()
             plot_map(confidence_map,index,self.opt.model_name)
