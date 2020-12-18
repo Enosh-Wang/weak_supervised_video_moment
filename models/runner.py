@@ -16,10 +16,12 @@ from tools.post_processing import post_processing
 import pickle
 from models.CMIL import get_lambda
 
+import inspect
+from gpu_mem_track import MemTracker
+
 class Runner(object):
 
     def __init__(self, opt, is_training):
-
         self.opt = opt
         self.is_training = is_training
         self.word2vec = load_glove(opt.glove_path)
@@ -39,7 +41,6 @@ class Runner(object):
         self.dataframe = self.get_df()
 
     def train(self):
-
         # Load data loaders
         # 加载数据集
         train_loader = get_data_loader(self.opt, self.word2vec, self.vocab, 'train', True)
@@ -49,15 +50,7 @@ class Runner(object):
         if self.opt.resume:
             self.load_model()
 
-        # checkpoint = torch.load('runs/supervise/checkpoint.pth.tar')
-        # re_dict = {k: v for k, v in checkpoint['model'].items() if 'bmn' in k}
-        # model_dict = self.model.state_dict()
-        # model_dict.update(re_dict) 
-        # self.model.load_state_dict(model_dict)
-        # Train the Model
         for epoch in range(self.start_epoch,self.opt.num_epochs):
-            # 重载学习速率，每 30 epoch 除以10，根据重载的epoch数计算当前的学习速率
-            #self.adjust_learning_rate(epoch)
             # train for one epoch
             lam = get_lambda(epoch, self.opt.num_epochs, self.opt.continuation_func)
             self.train_one_epoch(train_loader, epoch, lam)
@@ -87,21 +80,21 @@ class Runner(object):
         self.model.train()
 
         end = time.time()
-        for i, (videos, sentences, sentence_lengths, index, word_ids, gt_map) in enumerate(train_loader):
+        for i, (videos, sentences, sentence_lengths, index, word_ids) in enumerate(train_loader):
             # measure data loading time
             data_time.update(time.time() - end)
             self.iters += 1
-
             # Set mini-batch dataset
             if torch.cuda.is_available():
                 videos = videos.cuda()
                 sentences = sentences.cuda()
-
-            _,loss = self.model.forward(videos, sentences, sentence_lengths, word_ids, gt_map, self.logger, self.iters, lam)
- 
+            
+            _,loss = self.model.forward(videos, sentences, sentence_lengths, self.logger, self.iters, lam)
+            
             self.optimizer.zero_grad()
             # compute gradient and do SGD step
             loss.backward()
+            
             if self.opt.grad_clip > 0:
                 # 正则化
                 torch.nn.utils.clip_grad.clip_grad_norm_(filter(lambda p: p.requires_grad, self.model.parameters()), self.opt.grad_clip)
@@ -136,13 +129,13 @@ class Runner(object):
         batch_time = AverageMeter()
         end = time.time()
         all_result = {}
-        for iters, (videos, sentences, sentence_lengths, index, word_ids, gt_map) in enumerate(val_loader):
+        for iters, (videos, sentences, sentence_lengths, index, word_ids) in enumerate(val_loader):
             if torch.cuda.is_available():
                 videos = videos.cuda()
                 sentences = sentences.cuda()
             # compute the embeddings
             with torch.no_grad():
-                confidence_map,loss = self.model.forward(videos, sentences, sentence_lengths, word_ids, gt_map, self.logger, self.iters, lam)
+                confidence_map,loss = self.model.forward(videos, sentences, sentence_lengths, self.logger, self.iters, lam)
             
             confidence_map = confidence_map.detach().cpu().numpy()
             batch_result = self.generate_proposal(confidence_map, index)
@@ -192,6 +185,11 @@ class Runner(object):
                 path = os.path.join(self.opt.data_path, self.opt.dataset)+"/caption/activitynet_val.csv"
             else:
                 path = os.path.join(self.opt.data_path, self.opt.dataset)+"/caption/activitynet_test.csv"
+        elif self.opt.dataset== 'TACoS':
+            if self.is_training == True:
+                path = os.path.join(self.opt.data_path, self.opt.dataset)+"/caption/tacos_val.csv"
+            else:
+                path = os.path.join(self.opt.data_path, self.opt.dataset)+"/caption/tacos_test.csv"
         df = pandas.read_csv(open(path,'rb'))
         return df
 
@@ -217,11 +215,11 @@ class Runner(object):
             
             print("=> loaded checkpoint '{}' (epoch {}, max_recall {})"
                 .format(self.opt.resume, self.start_epoch, self.max_recall))
+
+            self.opt = checkpoint['opt']
         else:
             print("=> no checkpoint found at '{}'".format(self.opt.resume))
 
-            self.opt = checkpoint['opt']
-    
     def save_checkpoint(self, state, is_best, filename='checkpoint.pth.tar', prefix=''):
         """保存checkpoint，如果是best，再拷贝一份命名为model_best.pth.tar"""
         path = os.path.join(prefix,filename)
@@ -244,15 +242,15 @@ class Runner(object):
         batch_time = AverageMeter()
         end = time.time()
         all_result = {}
-        lam = get_lambda(self.opt.num_epochs,self.opt.num_epochs,self.opt.continuation_func)
-        for iters, (videos, sentences, sentence_lengths, index, word_ids, gt_map, ) in enumerate(test_loader):
+        lam = 0#get_lambda(self.opt.num_epochs,self.opt.num_epochs,self.opt.continuation_func)
+        for iters, (videos, sentences, sentence_lengths, index, word_ids ) in enumerate(test_loader):
             if torch.cuda.is_available():
                 videos = videos.cuda()
                 sentences = sentences.cuda()
             # compute the embeddings
             with torch.no_grad():
                 self.iters += 1
-                confidence_map,loss = self.model.forward(videos, sentences, sentence_lengths, word_ids, gt_map, self.logger, self.iters, lam)
+                confidence_map,loss = self.model.forward(videos, sentences, sentence_lengths, self.logger, self.iters, lam)
 
             confidence_map = confidence_map.detach().cpu().numpy()
             plot_map(confidence_map,index,self.opt.model_name)
@@ -324,6 +322,9 @@ class Runner(object):
             self.opt.vocab_size = len(vocab)
         elif self.opt.dataset == 'ActivityNet':
             vocab = pickle.load(open(os.path.join(self.opt.vocab_path, 'ActivityNet_vocab.pkl'), 'rb'))
+            self.opt.vocab_size = len(vocab)
+        elif self.opt.dataset == 'TACoS':
+            vocab = pickle.load(open(os.path.join(self.opt.vocab_path, 'TACoS_vocab.pkl'), 'rb'))
             self.opt.vocab_size = len(vocab)
         return vocab
     
