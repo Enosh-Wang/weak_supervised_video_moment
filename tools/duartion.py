@@ -11,9 +11,10 @@ from scipy.stats import norm,poisson,lognorm
 #df = pd.read_csv('/home/share/wangyunxiao/Charades/caption/charades_test.csv')
 
 #df = pd.read_csv('/home/share/wangyunxiao/ActivityNet/caption/activitynet_val.csv')
-df = pd.read_csv('/home/share/wangyunxiao/ActivityNet/caption/activitynet_train.csv')
+#df = pd.read_csv('/home/share/wangyunxiao/ActivityNet/caption/activitynet_train.csv')
 #df = pd.read_csv('/home/share/wangyunxiao/ActivityNet/caption/activitynet_test.csv')
 
+df = pd.read_csv('/home/share/wangyunxiao/TACoS/caption/tacos_train.csv')
 duration = df['duration']
 start = df['start_time']
 end = df['end_time']

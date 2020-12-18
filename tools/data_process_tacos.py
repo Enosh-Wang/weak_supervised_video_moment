@@ -9,7 +9,7 @@ import pickle
 
 
 def poolData(feats,num_prop=100,num_bin=1,num_sample_bin=3,pool_type="mean"):
-    feats = feats[0::2]
+    #feats = feats[0::2]
     feat_length,feat_dim = feats.shape
     # 如果feature长度为1，直接堆叠即可
     if feat_length == 1:
@@ -59,8 +59,8 @@ def poolData(feats,num_prop=100,num_bin=1,num_sample_bin=3,pool_type="mean"):
     return video_feature,feat_length
 if __name__ == "__main__":
     
-    datapath = '/home/share/wangyunxiao/ActivityNet'
-    feature_path = 'sub_activitynet_v1-3.c3d.hdf5'
+    datapath = '/home/share/wangyunxiao/TACoS'
+    feature_path = 'tall_c3d_features.hdf5'
     video_feature = h5py.File(os.path.join(datapath,feature_path), 'r')
 
     video_list = []
@@ -69,9 +69,9 @@ if __name__ == "__main__":
     num = 0
     for key,value in video_feature.items():
         video = key
-        feats = value['c3d_features']
+        feats = value
         # 把视频采样成100个点，每个点处的值又3个采样点取均值算得
-        videoFeature_mean,feat_length=poolData(feats,num_prop=127,num_bin=1,num_sample_bin=3,pool_type="mean")
+        videoFeature_mean,feat_length=poolData(feats,num_prop=255,num_bin=1,num_sample_bin=3,pool_type="mean")
         length += feat_length
         num += 1
         video_list.append(video)
@@ -79,5 +79,5 @@ if __name__ == "__main__":
     print('average_length:',length/num)
     data = dict(zip(video_list,feats_list))
     # 保存新的特征
-    with open(os.path.join(datapath,'activitynet_127.pkl'),'wb') as f:
+    with open(os.path.join(datapath,'tacos_255.pkl'),'wb') as f:
         pickle.dump(data,f)

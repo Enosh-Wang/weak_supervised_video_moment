@@ -38,6 +38,7 @@ def save_csv(name,caption_data):
     df['description'] = sentences_list
 
     # 不保留行索引数字
+    df = df.sample(frac=1)
     df.to_csv(name,index=False)
 
 with open(os.path.join(datapath,train_caption_path), encoding='utf8') as f:
