@@ -92,6 +92,7 @@ def parse_args():
     parser.add_argument('--kernel_size', default=3, type=int)
     parser.add_argument('--stride', default=2, type=int)
     parser.add_argument('--neg_num', default=3, type=int)
+    parser.add_argument('--smooth_lam', default=1, type=float)
     args = parser.parse_args()
     return args
 
@@ -150,13 +151,13 @@ def cfg_from_file(dataset,opt):
     
 
 if __name__ == '__main__':
-    # os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "2"
     opt = parse_args()
     logging.basicConfig(format='%(asctime)s %(message)s', level=logging.INFO)
     opt.dataset = 'TACoS'
     cfg_from_file(opt.dataset,opt)
 
-
+    # for i in range()
     print(opt)
     train_runner = Runner(opt,is_training = True)
     train_runner.train()

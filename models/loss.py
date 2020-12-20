@@ -436,6 +436,7 @@ class Criterion(nn.Module): #local
         b = video.size(0)
         postive_map = []
         score_map = []
+        # smooth = torch.tensor(0.).cuda()
 
         for i in range(b):
             word = words[i] # [l,c]
@@ -452,6 +453,10 @@ class Criterion(nn.Module): #local
                 v = l2norm(v,dim=-1)
                 v_s = l2norm(v_s,dim=-1)
                 sim = torch.cosine_similarity(v,v_s,dim=-1) # [b,l,c] -> [b,l]
+
+                # tmp = sim[i]
+                # for j in range(len(tmp)-1):
+                #     smooth += (tmp[j+1] - tmp[j])**2
                 score.append(sim) # [b,l]
             
             score = torch.cat(score,dim=1)
@@ -464,9 +469,14 @@ class Criterion(nn.Module): #local
         postive_map = torch.stack(postive_map) # [b,l]
         scores = torch.stack(score_map) # [b,b]
 
+        sparse_loss = (postive_map+1).sum()/b
+
         loss = diag(scores,self.opt.global_margin)
 
+        # smooth = smooth/b
         if self.training and iters % self.opt.log_step == 0:
             writer.add_scalar('loss',loss,iters)
+            # writer.add_scalar('smooth_loss',smooth,iters)
+            writer.add_scalar('sparse_loss',sparse_loss,iters)
     
-        return loss, postive_map
+        return loss+sparse_loss, postive_map #+smooth*self.opt.smooth_lam
