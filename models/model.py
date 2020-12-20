@@ -14,6 +14,7 @@ from tools.util import get_mask, get_mask_spare,get_iou_map,iou_with_anchors,get
 from models.cross import xattn_score_t2i
 from models.IMRAM import SCAN,ContrastiveLoss,frame_by_word
 from models.bmn_action import BMN_action
+from DC.modules.modulated_deform_conv import ModulatedDeformConvPack
 
 import inspect
 from gpu_mem_track import MemTracker

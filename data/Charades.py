@@ -5,8 +5,6 @@ import os
 import nltk
 import numpy as np
 import pandas
-import scipy.io as sio
-import skimage.measure as scikit
 import pickle
 import json
 from tools.util import get_match_map, iou_with_anchors, get_mask, get_mask_spare
