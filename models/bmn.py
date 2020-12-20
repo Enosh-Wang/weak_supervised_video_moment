@@ -6,11 +6,76 @@ import torch.nn as nn
 from tools.util import l2norm
 import torch.nn.functional as F
 from collections import OrderedDict
-from models.IMRAM import frame_by_word
+from models.IMRAM import SCAN,ContrastiveLoss,frame_by_word
 from DC.modules.modulated_deform_conv import ModulatedDeformConvPack
 
+import random
+
+from models.mapping import mapping
+import os
+import numpy as np
+import matplotlib
+matplotlib.use('agg')
+import matplotlib.pyplot as plt
+
+def plot_map(score_maps, name):
+    # 可视化保存路径
+    path = os.path.join(name)
+    if not os.path.exists(path):
+        os.makedirs(path)
+    
+    batch_size = score_maps.shape[0]
+    channel_size = score_maps.shape[1]
+    f = plt.figure(figsize=(6,4))
+    for i in range(1):
+        for j in range(channel_size):
+            score_map = score_maps[i,j]
+            plt.matshow(score_map, cmap = plt.cm.cool)
+            plt.ylabel("duration")
+            plt.xlabel("start time")
+            plt.colorbar()
+            plt.savefig(os.path.join(path,str(i)+'_'+str(j)+'.png'))
+            plt.clf()
+    plt.close(f)
+
+def plot_maps(score_maps, name):
+    # 可视化保存路径
+    path = os.path.join(name)
+    if not os.path.exists(path):
+        os.makedirs(path)
+    
+    f = plt.figure(figsize=(6,4))
+    plt.matshow(score_maps, cmap = plt.cm.cool)
+    plt.ylabel("b")
+    plt.xlabel("c")
+    plt.colorbar()
+    plt.savefig(os.path.join(path,'sentence.png'))
+    plt.clf()
+    plt.close(f)
+
+def plot_mask(score_map, name):
+    # 可视化保存路径
+
+    f = plt.figure(figsize=(6,4))
+    plt.matshow(score_map, cmap = plt.cm.cool)
+    plt.ylabel("y")
+    plt.xlabel("x")
+    plt.colorbar()
+    plt.savefig(name+'.png')
+    plt.close(f)
+
+def mask2weight(mask2d, mask_kernel, padding=0):
+    # from the feat2d.py,we can know the mask2d is 4-d
+    #plot_mask(mask2d.cpu().detach().numpy(),'mask')
+    weight = torch.conv2d(mask2d[None,None,:,:].float(),
+        mask_kernel, padding=padding)[0, 0]
+    #plot_mask(weight.cpu().detach().numpy(),'weight')
+    weight[weight > 0] = 1 / weight[weight > 0]
+    #plot_mask(weight.cpu().detach().numpy(),'re_weight')
+    return weight
+
 class BMN(nn.Module):
-    def __init__(self, opt):
+    def __init__(self, opt, match_map ,v_mask):
         super(BMN, self).__init__()
         self.opt = opt
         self.tscale = opt.temporal_scale # 时序尺寸（论文中的T）
@@ -19,92 +84,85 @@ class BMN(nn.Module):
         self.duration_end = int(self.tscale*(1-opt.end_ratio))
         self.num_sample = opt.num_sample # 采样点数目（论文中的N）
         self.num_sample_perbin = opt.num_sample_perbin # 子采样点的数目
-
+        self.length, self.center = self.get_pmap(match_map)
         self._get_interp1d_mask()
-
-        self.hidden_dim_1d = 512
-        self.hidden_dim_2d = 512
-        self.hidden_dim_3d = 512
-
+        
         # Proposal Evaluation Module
-        self.x_1d_p = nn.Sequential(OrderedDict([
-            ('conv1',nn.Conv1d(400, self.hidden_dim_1d, kernel_size=3, padding=1)),
-            ('norm1',nn.BatchNorm1d(self.hidden_dim_1d)),
-            ('relu1',nn.ReLU(inplace=True))])
+        self.conv_1d = nn.Sequential(
+            nn.Conv1d(opt.video_dim, opt.joint_dim, kernel_size=3, padding=1),
+            nn.BatchNorm1d(opt.joint_dim),
+            nn.ReLU(inplace=True)
         )
-        self.x_3d_p = nn.Sequential(OrderedDict([
-            ('conv2',nn.Conv3d(self.hidden_dim_1d, self.hidden_dim_3d, kernel_size=(self.num_sample, 1, 1),stride=(self.num_sample, 1, 1))),
-            ('norm2',nn.BatchNorm3d(self.hidden_dim_3d)),
-            ('relu2',nn.ReLU(inplace=True))])
+        self.conv_3d = nn.Sequential(
+            nn.Conv3d(opt.joint_dim, opt.joint_dim, kernel_size=(self.num_sample, 1, 1),stride=(self.num_sample, 1, 1)),
+            nn.BatchNorm3d(opt.joint_dim),
+            nn.ReLU(inplace=True)
         )
-        self.x_2d_p1 = nn.Sequential(OrderedDict([
-            ('conv3',nn.Conv2d(self.hidden_dim_3d+2, self.hidden_dim_2d, kernel_size=1)), 
-            ('norm3',nn.BatchNorm2d(self.hidden_dim_2d)),
-            ('relu3',nn.ReLU(inplace=True))])
+        self.conv_2d = nn.Sequential(
+            nn.Conv2d(opt.joint_dim+2, opt.joint_dim, kernel_size=1),
+            nn.BatchNorm2d(opt.joint_dim),
+            nn.ReLU(inplace=True)
         )
-        self.x_2d_p2 = nn.Sequential(OrderedDict([
-            ('conv4',nn.Conv2d(self.hidden_dim_2d, self.opt.joint_dim, kernel_size=3,padding=1)), 
-            ('norm4',nn.BatchNorm2d(self.opt.joint_dim)),
-            ('relu4',nn.ReLU(inplace=True))])
-        )
-        self.x_2d_p3 = nn.Sequential(OrderedDict([
-            ('conv5',nn.Conv2d(self.opt.joint_dim*2, self.opt.joint_dim, kernel_size=1)), 
-            ('norm5',nn.BatchNorm2d(self.opt.joint_dim)),
-            ('relu5',nn.ReLU(inplace=True))])
-        )
+        
+        # k = opt.kernel_size
+        # l = opt.map_layers
 
-        # for m in self.modules():
-        #     if isinstance(m,nn.Conv1d) or isinstance(m,nn.Conv2d) or isinstance(m,nn.Conv3d):
-        #         nn.init.kaiming_normal_(m.weight, nonlinearity='relu')#卷积层参数初始化
-        #         nn.init.zeros_(m.bias)
-        #     elif isinstance(m,nn.BatchNorm1d) or isinstance(m,nn.BatchNorm2d) or isinstance(m,nn.BatchNorm3d):
-        #         nn.init.ones_(m.weight)
-        #         nn.init.zeros_(m.bias)
-        for n,m in self.named_modules():
-            if 'conv' in n:
-                nn.init.kaiming_normal_(m.weight, nonlinearity='relu')#卷积层参数初始化
+        # mask_kernel = torch.ones(1,1,k,k).cuda()
+        # first_padding = (k - 1) * l // 2
+
+        # self.weights = [
+        #     mask2weight(v_mask, mask_kernel, padding=first_padding) 
+        # ]
+        # self.conv_map = nn.ModuleList(
+        #     [nn.Conv2d(opt.joint_dim, opt.joint_dim, k, padding=first_padding)]
+        # )
+
+        # for _ in range(l - 1):
+        #     self.weights.append(mask2weight(self.weights[-1] > 0, mask_kernel))
+        #     self.conv_map.append(nn.Conv2d(opt.joint_dim, opt.joint_dim, k))
+        
+
+        for m in self.modules():
+            if isinstance(m, (nn.Conv1d,nn.Conv2d,nn.Conv3d)):
+                nn.init.kaiming_normal_(m.weight, nonlinearity='relu') # 卷积层参数初始化
                 nn.init.zeros_(m.bias)
-            if 'norm' in n:
+            elif isinstance(m, (nn.BatchNorm1d,nn.BatchNorm2d,nn.BatchNorm3d)):
                 nn.init.ones_(m.weight)
                 nn.init.zeros_(m.bias)
 
-        self.mdc = ModulatedDeformConvPack(self.opt.joint_dim,1,kernel_size=3,stride=1,padding=1)
+        # self.mdc = ModulatedDeformConvPack(self.hidden_dim_2d,self.opt.joint_dim,kernel_size=3,stride=1,padding=1)
 
-
-    def forward(self, video, sentence, mask, match_map, sentence_mask):
-        # 转换维度，维度在前，帧数在后 [b,c,t] sentence [b,c]
+    def forward(self, video, v_mask):
+        # 转换维度，维度在前，帧数在后 [b,c,t]
         video = video.transpose(1,2)
-        # 一层时序卷积
-        confidence_map = self.x_1d_p(video)
-        # 置信度图
-        confidence_map = self._boundary_matching_layer(confidence_map)
-        confidence_map = self.x_3d_p(confidence_map).squeeze(2) # -> [b,c,d,t]
-        
-        # 拼接时间戳
-        b,c,d,t = confidence_map.size()
-        match_map = torch.Tensor(match_map).cuda().view(1,d,t,2)
-        match_map = match_map.permute(0,3,1,2).repeat(b,1,1,1)
-        length = match_map[:,1,:,:] - match_map[:,0,:,:]
-        center = match_map[:,0,:,:] + length/2
-        #confidence_map = torch.cat((confidence_map,match_map),dim=1) # 拼接开始和结束时刻
-        confidence_map = torch.cat((confidence_map,center.unsqueeze(1),length.unsqueeze(1)),dim=1) # 拼接中点和长度
-        confidence_map = self.x_2d_p1(confidence_map)
 
-        output = self.x_2d_p2(confidence_map)
-        
-        # # 模态处理
-        # confidence_map = confidence_map.permute(0,2,3,1).view(b,-1,c) # ->[b,d*t,c]
-        # sentence = frame_by_word(confidence_map,mask.view(1,-1),sentence,sentence_mask,self.opt)
-        # confidence_map = confidence_map.permute(0,2,1).view(b,c,d,t)
-        # sentence = sentence.permute(0,2,1).view(b,c,d,t)
-        # feature = torch.cat([confidence_map,sentence],dim=1)
-        # feature = self.x_2d_p3(feature)
+        v_map = self.conv_1d(video)
+        batch_size = v_map.size(0) 
 
-        attn = torch.sigmoid(self.mdc(confidence_map))
-        #feature = self.x_2d_p3(feature)
-        output = output*attn
+        v_map = self._boundary_matching_layer(v_map)
+        v_map = self.conv_3d(v_map).squeeze() # -> [b,c,d,t]
         
-        return output
+        center = self.center.repeat(batch_size,1,1,1)
+        length = self.length.repeat(batch_size,1,1,1)
+        v_map = torch.cat([v_map,center,length],dim=1)
+        # plot_map(v_map.cpu().detach().numpy(),'pe')
+        v_map = self.conv_2d(v_map)*v_mask.float()
+        # plot_map(v_map.cpu().detach().numpy(),'pe_conv')
+        # for layer, weight in zip(self.conv_map, self.weights):
+        #     v_map = layer(v_map).relu() * weight
+        #     # plot_map((v_map*v_mask.float()).cpu().detach().numpy(),'scdm_weight_mask')
+        #     # exit()
+        return v_map
+
+    def get_pmap(self, match_map):
+
+        match_map = torch.Tensor(match_map).cuda().view(-1,self.tscale,2)
+        match_map = match_map.permute(2,0,1)
+
+        length = match_map[1,:,:] - match_map[0,:,:]
+        center = match_map[0,:,:] + length/2
+        
+        return length.view(1,1,-1,self.tscale), center.view(1,1,-1,self.tscale)
 
     def _boundary_matching_layer(self, x):
         input_size = x.size()

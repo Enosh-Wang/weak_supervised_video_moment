@@ -7,7 +7,8 @@ import pandas
 
 annotations = {
     'ActivityNet': ['activitynet_test.csv','activitynet_train.csv','activitynet_val.csv'],
-    'Charades': ['charades_test.csv','charades_train.csv','charades_val.csv']
+    'Charades': ['charades_test.csv','charades_train.csv','charades_val.csv'],
+    'TACoS': ['tacos_test.csv','tacos_train.csv','tacos_val.csv']
 }
 
 class Vocabulary(object):
@@ -78,7 +79,7 @@ def main(data_path, data_name):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_path', default='/home/share/wangyunxiao/')
-    parser.add_argument('--data_name', default='ActivityNet',
-                        help='Charades, ActivityNet')
+    parser.add_argument('--data_name', default='TACoS',
+                        help='Charades, ActivityNet,TACoS')
     opt = parser.parse_args()
     main(opt.data_path, opt.data_name)
