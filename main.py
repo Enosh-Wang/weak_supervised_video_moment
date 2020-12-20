@@ -19,7 +19,7 @@ def parse_args():
                         help='Path to saved vocabulary pickle files.')
     parser.add_argument('--glove_path', default='/home/share/wangyunxiao/Glove/glove.840B.300d/glove.840B.300d.pkl',
                         help='Path to saved vocabulary pickle files.')
-    parser.add_argument('--num_epochs', default=20, type=int)
+    parser.add_argument('--num_epochs', default=10, type=int)
     parser.add_argument('--learning_rate', default=.002, type=float) # 论文中设为0.001
     parser.add_argument('--weight_decay', default=0.0001, type=float)
     parser.add_argument('--lr_update', default=20, type=int) # 论文中为15
@@ -27,7 +27,7 @@ def parse_args():
                         help='Rank loss margin.') # 0.1 for Charades-STA and 0.2 for DiDeMo
     parser.add_argument('--local_margin', default=0.2, type=float,
                         help='Rank loss margin.') # 0.1 for Charades-STA and 0.2 for DiDeMo
-    parser.add_argument('--batch_size', default=64, type=int,
+    parser.add_argument('--batch_size', default=32, type=int,
                         help='Size of a training mini-batch.') # 论文中为128
     parser.add_argument('--word_dim', default=300, type=int,
                         help='Dimensionality of the word embedding.')
@@ -85,15 +85,24 @@ def parse_args():
                         help='full_IMRAM|text_IMRAM')
     parser.add_argument('--iteration_step', default=3, type=int,
                         help='routing_step')
+    parser.add_argument('--dilation_rate', default=1, type=int)
+    parser.add_argument('--layers', default=2, type=int)
+    parser.add_argument('--kernel_size', default=3, type=int)
+    parser.add_argument('--stride', default=2, type=int)
+    parser.add_argument('--neg_num', default=3, type=int)
     args = parser.parse_args()
     return args
 
 if __name__ == '__main__':
-    #os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+    # os.environ["CUDA_VISIBLE_DEVICES"] = "3"
     opt = parse_args()
     print(opt)
     logging.basicConfig(format='%(asctime)s %(message)s', level=logging.INFO)
 
+
+    # for i in range(1,10,2):
+    #     opt.kernel_size = i
+    #     opt.model_name = 'kernel_' + str(opt.kernel_size)
     train_runner = Runner(opt,is_training = True)
     train_runner.train()
     test_runner = Runner(opt, is_training = False)

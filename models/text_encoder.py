@@ -4,7 +4,30 @@ import torch.nn.functional as F
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from tools.util import PositionalEncoding,multihead_mask,l2norm
 from models.graph_convolution import GraphConvolution
-from transformers import BertModel, BertConfig
+#from transformers import BertModel, BertConfig
+import os
+import numpy as np
+import matplotlib
+matplotlib.use('agg')
+import matplotlib.pyplot as plt
+
+def plot_map(score_maps, name):
+    # 可视化保存路径
+    path = os.path.join(name)
+    if not os.path.exists(path):
+        os.makedirs(path)
+    
+    batch_size = score_maps.shape[0]
+    f = plt.figure(figsize=(6,4))
+    for i in range(batch_size):
+        score_map = score_maps[i]
+        plt.matshow(score_map, cmap = plt.cm.cool)
+        plt.ylabel("l")
+        plt.xlabel("c")
+        plt.colorbar()
+        plt.savefig(os.path.join(path,str(i)+'.png'))
+        plt.clf()
+    plt.close(f)
 
 class TextEncoderMulti(nn.Module):
 
@@ -57,11 +80,17 @@ class TextEncoderGRU(nn.Module):
         padded = pad_packed_sequence(out)
 
         sentences = padded[0].transpose(0,1) # [l,b,c]->[b,l,c]
+        # plot_map(sentences.cpu().detach().numpy(),'sentence')
 
-        I = torch.LongTensor(sentence_lengths).view(-1, 1, 1) # view的作用类似reshape
-        I = I.expand(sentences.size(0), 1, self.opt.joint_dim)-1
-        I = I.cuda()
-        global_sentences = torch.gather(sentences, 1, I).squeeze(1)
+        batch_size = sentences.size(0)
+        # global_sentences = torch.cat([],sentences[range(batch_size),0,self.opt.joint_dim:]])
+        fore = sentences[range(batch_size),np.asarray(sentence_lengths)-1,:self.opt.joint_dim//2]
+        back = sentences[:,0,self.opt.joint_dim//2:]
+        global_sentences = torch.cat([fore,back],dim=-1)
+        # I = torch.LongTensor(sentence_lengths).view(-1, 1, 1) # view的作用类似reshape
+        # I = I.expand(sentences.size(0), 1, self.opt.joint_dim)-1
+        # I = I.cuda()
+        # global_sentences = torch.gather(sentences, 1, I).squeeze(1)
         # normalization in the joint embedding space
         global_sentences = l2norm(global_sentences,dim=-1)
         
