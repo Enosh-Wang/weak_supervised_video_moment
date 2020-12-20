@@ -4,7 +4,6 @@ import torch.nn.functional as F
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from tools.util import PositionalEncoding,multihead_mask,l2norm
 from models.graph_convolution import GraphConvolution
-#from transformers import BertModel, BertConfig
 import os
 import numpy as np
 import matplotlib

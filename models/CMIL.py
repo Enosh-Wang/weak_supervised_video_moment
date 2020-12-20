@@ -37,7 +37,7 @@ def get_video_score_nms(scores, valid_num, lam, iou_maps, p_ind):
             if len(neg_inds) == 0:
                 neg_score = torch.tensor(0.).cuda()
             else:
-                neg_score = torch.sum(score[neg_inds])
+                neg_score = torch.mean(score[neg_inds])
 
     return torch.stack(v_score), neg_score
     

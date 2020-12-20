@@ -26,7 +26,6 @@ class Model(nn.Module):
         self.opt = opt
         self.vocab = vocab
         self.GRU = TextEncoderGRU(opt)
-        
         self.v_mask = torch.IntTensor(get_mask(opt.temporal_scale,opt.start_ratio,opt.end_ratio)).cuda()#.view(1,-1)
         self.valid_num = torch.sum(self.v_mask)
         self.match_map = get_match_map(opt.temporal_scale,opt.start_ratio,opt.end_ratio)

@@ -5,7 +5,7 @@ from collections import OrderedDict
 import math
 import pickle
 import math
-
+import os
 def Lognorm(x,mean,std):
     x = x.clamp(min=0)+1e-8
     return torch.exp( -0.5*( (torch.log(x)-mean)/std )**2 ) / std*x*math.sqrt(math.pi*2)
@@ -246,7 +246,7 @@ def cIoU(pred, gt):
     union = max(pred[1], gt[1]) + 1 - min(pred[0], gt[0])
     return float(intersection)/union
 
-def t2i( df, filename, is_training):
+def t2i( df, filename, modelname, is_training):
     """
     Text->videos (Image Search)
     videos: (N, K) matrix of videos
@@ -332,6 +332,7 @@ def t2i( df, filename, is_training):
     R1IOU07=correct_num07
     R1IOU03=correct_num03
     if is_training == False:
+        
         print("R@1 IoU0.3: %f" %(R1IOU03/float(total_length)))
         print("R@5 IoU0.3: %f" %(R5IOU3/float(total_length)))
         print("R@10 IoU0.3: %f" %(R10IOU3/float(total_length)))
@@ -343,6 +344,17 @@ def t2i( df, filename, is_training):
         print("R@1 IoU0.7: %f" %(R1IOU07/float(total_length)))
         print("R@5 IoU0.7: %f" %(R5IOU7/float(total_length)))
         print("R@10 IoU0.7: %f" %(R10IOU7/float(total_length)))
-	
-	
+        with open(modelname+'.txt','w') as f:
+            f.write("R@1 IoU0.3: %f \n" %(R1IOU03/float(total_length)))
+            f.write("R@5 IoU0.3: %f \n" %(R5IOU3/float(total_length)))
+            f.write("R@10 IoU0.3: %f \n" %(R10IOU3/float(total_length)))
+            
+            f.write("R@1 IoU0.5: %f \n" %(R1IOU05/float(total_length)))
+            f.write("R@5 IoU0.5: %f \n" %(R5IOU5/float(total_length)))
+            f.write("R@10 IoU0.5: %f \n" %(R10IOU5/float(total_length)))
+            
+            f.write("R@1 IoU0.7: %f \n" %(R1IOU07/float(total_length)))
+            f.write("R@5 IoU0.7: %f \n" %(R5IOU7/float(total_length)))
+            f.write("R@10 IoU0.7: %f \n" %(R10IOU7/float(total_length)))
+    
     return R1IOU03/float(total_length), R1IOU05/float(total_length), R1IOU07/float(total_length)

@@ -94,8 +94,7 @@ class Criterion(nn.Module):
 
             score = score.masked_fill(v_mask == 0, float('-inf'))
             postive_map.append(score[i]) #[d,t]
-            # plot_map(score,'tacos')
-            # exit()
+           
             score = score.view(b,-1)
             score,neg_score = get_video_score_nms(score, valid_num, lam, iou_maps, i)
 

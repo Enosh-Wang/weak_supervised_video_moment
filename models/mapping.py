@@ -35,15 +35,13 @@ class mapping(nn.Module):
         super(mapping, self).__init__()
         self.opt = opt
         self.conv = nn.Conv2d(in_channels,out_channels,kernel_size,padding=padding)
-        # self.conv1 = nn.Conv2d(in_channels,out_channels,kernel_size,padding=padding)
-        # self.norm = nn.BatchNorm2d(out_channels)
+        self.norm = nn.BatchNorm2d(out_channels)
         self.modulation = scdm(opt)
 
     def forward(self, v_map, v_mask, words, w_mask):
         v_map = self.modulation(v_map,v_mask,words,w_mask)
         # plot_map(v_map.cpu().detach().numpy(),'scdm')
         v_map = self.conv(v_map).relu()
-        # v_map = self.conv1(v_map).relu()
         # plot_map(v_map.cpu().detach().numpy(),'scdm_conv')
         
         return v_map
