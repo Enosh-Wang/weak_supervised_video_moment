@@ -11,9 +11,9 @@ import matplotlib
 matplotlib.use('agg')
 import matplotlib.pyplot as plt
 import os
-from models.mapping import mapping,score_module
+from models.mapping import mapping
 from models.IMRAM import frame_by_word
-from torchcam.cams import GradCAM
+
 
 def plot_map(score_maps, map_name):
     score_maps = score_maps.cpu().numpy()
@@ -387,42 +387,6 @@ class Criterion_fusion(nn.Module): # cat_fusion
 
         return loss, postive_map
 
-class Criterion(nn.Module): #cam
-    def __init__(self, opt):
-        super().__init__()
-        self.opt = opt
-        self.score_module = score_module(opt)
-        self.cam = GradCAM(self.score_module, 'first_conv')
-
-    def forward(self, video, words, w_masks, sentences, writer, iters, lam):
-
-        # words[b,l,c]
-        video = video.transpose(1,2) # [b,l,c] -> [b,c,l]
-        b = video.size(0)
-        postive_map = []
-        score_map = []
-
-        for i in range(b):
-            sentence = sentences[i]
-            sentence = sentence.unsqueeze(0).repeat(b,1)
-
-            score = self.score_module(video,sentence)
-            
-            a_map = self.cam(class_idx=0, scores=score.unsqueeze(1))
-            
-            postive_map.append(a_map)
-            score_map.append(score)
-
-        postive_map = torch.stack(postive_map) # [b,l]
-        scores = torch.stack(score_map) # [b,b]
-       
-        loss = diag(scores,self.opt.global_margin)
-        
-        if self.training and iters % self.opt.log_step == 0:
-            writer.add_scalar('loss',loss,iters)
-        
-        return loss, postive_map
-
 def Caption_Criterion(pred, word_id, sentence_lengths):
     word_id = word_id.transpose(0,1).cuda()
     target_captions = pack_padded_sequence(word_id,sentence_lengths)[0]
@@ -447,7 +411,7 @@ def pem_cls_loss_func(pred_score, gt_iou_map, mask):
     loss = -1 * torch.sum(loss_pos + loss_neg) / num_entries
     return loss
 
-class Criterion_cosine(nn.Module): #local_global
+class Criterion(nn.Module): #local
     def __init__(self, opt):
         super().__init__()
         self.opt = opt
@@ -493,10 +457,10 @@ class Criterion_cosine(nn.Module): #local_global
             score = torch.cat(score,dim=1)
             postive_map.append(score[i])
             
-            # score_map.append(score.max(dim=1)[0])
+            score_map.append(score.max(dim=1)[0])
             # score_map.append(score.mean(dim=1))
-            score = get_video_score_nms_list(score,lam,iou_map,i)
-            score_map.append(score)
+            # score = get_video_score_nms_list(score,lam,iou_map,i)
+            # score_map.append(score)
         postive_map = torch.stack(postive_map) # [b,l]
         scores = torch.stack(score_map) # [b,b]
 
