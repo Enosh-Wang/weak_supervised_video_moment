@@ -230,7 +230,7 @@ class Runner(object):
 
     def test(self, model_path):
         # optionally resume from a checkpoint
-        checkpoint = torch.load(os.path.join(model_path,'checkpoint.pth.tar'))
+        checkpoint = torch.load(os.path.join(model_path,'model_best.pth.tar'))
         self.opt = checkpoint['opt'] # 测试时如果要更改参数需要在这一句后面手动更改，从命令行更改无效
         print(self.opt)
         print('Loading dataset')
