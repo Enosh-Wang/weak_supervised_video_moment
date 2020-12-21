@@ -33,7 +33,7 @@ class Runner(object):
             cudnn.benchmark = True
 
         self.optimizer = torch.optim.SGD(self.get_param(), lr=opt.learning_rate,momentum=0.9)
-        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=opt.num_epochs, eta_min=opt.learning_rate/10)
+        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=opt.num_epochs, eta_min=opt.learning_rate/100)
         self.logger = SummaryWriter(os.path.join(opt.model_path,opt.model_name), flush_secs=5)
         self.iters = 0
         self.start_epoch = 0

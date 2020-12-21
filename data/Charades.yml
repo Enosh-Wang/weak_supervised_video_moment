@@ -1,5 +1,5 @@
 temporal_scale: 31
 video_dim: 4096
-layers: 4
+layers: 3
 dataset: Charades
-batch_size: 1
+batch_size: 32
