@@ -31,7 +31,7 @@ class TACoS(data.Dataset):
         self.data_split=data_split
         # 数据集地址
         self.data_path=data_path
-        feature_path = os.path.join(data_path,'tacos_255.pkl')
+        feature_path = os.path.join(data_path,'tacos_31.pkl')
         with open(feature_path,'rb') as f:
             self.feature = pickle.load(f)
         

@@ -1,7 +1,7 @@
 import pandas as pd
 import math
 import random
-
+import os
 def save_csv(name,data,video_dict):
     video_list = []
     start_time_list = []
@@ -11,16 +11,18 @@ def save_csv(name,data,video_dict):
 
     for line in data:
         video_name = line.split(' ')[0]
-        start_time = line.split(' ')[1]
-        end_time = line.split('##')[0].split(' ')[2]
+        start_time = float(line.split(' ')[1])
+        end_time = float(line.split('##')[0].split(' ')[2])
         description = line.split('##')[1]
-        duration = video_dict[video_name]
-
-        duration_list.append(duration)
-        video_list.append(video_name)
-        start_time_list.append(start_time)
-        end_time_list.append(end_time)
-        description_list.append(description)
+        duration = float(video_dict[video_name])
+        end_time = min(end_time,duration)
+        
+        if start_time < end_time:
+            duration_list.append(duration)
+            video_list.append(video_name)
+            start_time_list.append(start_time)
+            end_time_list.append(end_time)
+            description_list.append(description)
     
     df = pd.DataFrame()
     df['video'] = video_list
@@ -51,9 +53,9 @@ video_length = list(train_df['length'])+list(test_df['length'])
 
 video_dict = dict(zip(video_name,video_length))
 # 解析字段，并保存为csv
-save_csv('/home/share/wangyunxiao/Charades/caption/charades_train.csv',train_list,video_dict)
-save_csv('/home/share/wangyunxiao/Charades/caption/charades_val.csv',val_list,video_dict)
-save_csv('/home/share/wangyunxiao/Charades/caption/charades_test.csv',test_txt,video_dict)
+save_csv('/home/share/wangyunxiao/Charades/caption/charades_train_valid.csv',train_list,video_dict)
+save_csv('/home/share/wangyunxiao/Charades/caption/charades_val_valid.csv',val_list,video_dict)
+save_csv('/home/share/wangyunxiao/Charades/caption/charades_test_valid.csv',test_txt,video_dict)
 
 
 

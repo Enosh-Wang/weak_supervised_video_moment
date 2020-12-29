@@ -49,7 +49,7 @@ def plot_map(score_maps, index, opt):
     if not os.path.exists(path):
         os.makedirs(path)
     
-    batch_size = score_maps.shape[0]
+    batch_size,length = score_maps.shape
 
     for i in range(batch_size):
         score_map = score_maps[i]
@@ -61,9 +61,11 @@ def plot_map(score_maps, index, opt):
         end = 0
         for j in range(opt.layers):
             l = (l-k)//s+1
-            end = start + l
-            plt.plot(list(range(l)),score_map[start:end])
-            start = end
+            if j >= opt.start_layer - 1:
+                end = start + l
+                plt.plot(list(range(l)),score_map[start:end])
+                start = end
+        assert end == length , "{} != {}".format(end, length)
         plt.savefig(os.path.join(path,str(index[i])+'.png'))
         plt.close(f)
         

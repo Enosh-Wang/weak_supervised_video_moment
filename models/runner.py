@@ -39,7 +39,7 @@ class Runner(object):
         self.start_epoch = 0
         self.max_recall = 0
         self.dataframe = self.get_df()
-        self.match_map = get_window_list(opt.layers,opt.kernel_size,opt.stride,opt.temporal_scale)
+        self.match_map = get_window_list(opt.layers,opt.kernel_size,opt.stride,opt.temporal_scale,opt.start_layer)
 
     def train(self):
         # Load data loaders
@@ -308,6 +308,7 @@ class Runner(object):
         batch_size,length = score_map.shape
         batch_result = {}
 
+        assert length == match_map.shape[0], 'The number of clips is not equal'
         for i in range(batch_size):
             results = []
             for j in range(length):

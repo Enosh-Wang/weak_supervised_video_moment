@@ -6,7 +6,7 @@ from scipy.interpolate import interp1d
 import h5py
 import os
 import pickle
-
+from tqdm import tqdm
 
 def poolData(feats,num_prop=100,num_bin=1,num_sample_bin=3,pool_type="mean"):
     #feats = feats[0::2]
@@ -59,7 +59,7 @@ def poolData(feats,num_prop=100,num_bin=1,num_sample_bin=3,pool_type="mean"):
     return video_feature,feat_length
 if __name__ == "__main__":
     
-    datapath = '/home/share/wangyunxiao/TACoS'
+    datapath = '/home/share/wangyunxiao/2D-TAN/tacos/features'
     feature_path = 'tall_c3d_features.hdf5'
     video_feature = h5py.File(os.path.join(datapath,feature_path), 'r')
 
@@ -67,17 +67,19 @@ if __name__ == "__main__":
     feats_list = []
     length = 0
     num = 0
+    bar = tqdm(total=len(video_feature))
     for key,value in video_feature.items():
         video = key
         feats = value
         # 把视频采样成100个点，每个点处的值又3个采样点取均值算得
-        videoFeature_mean,feat_length=poolData(feats,num_prop=128,num_bin=1,num_sample_bin=3,pool_type="mean")
+        videoFeature_mean,feat_length=poolData(feats,num_prop=256,num_bin=1,num_sample_bin=3,pool_type="mean")
         length += feat_length
         num += 1
         video_list.append(video)
         feats_list.append(videoFeature_mean)
+        bar.update(1)
     print('average_length:',length/num)
     data = dict(zip(video_list,feats_list))
     # 保存新的特征
-    with open(os.path.join(datapath,'tacos_128.pkl'),'wb') as f:
+    with open(os.path.join(datapath,'tacos_256.pkl'),'wb') as f:
         pickle.dump(data,f)

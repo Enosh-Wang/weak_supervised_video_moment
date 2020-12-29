@@ -93,6 +93,7 @@ def parse_args():
     parser.add_argument('--stride', default=2, type=int)
     parser.add_argument('--neg_num', default=3, type=int)
     parser.add_argument('--smooth_lam', default=1, type=float)
+    parser.add_argument('--start_layer', default=1, type=float)
     args = parser.parse_args()
     return args
 
@@ -145,7 +146,7 @@ def cfg_from_file(dataset,opt):
         filename = 'data/ActivityNet.yml'
 
     with open(filename, 'r') as f:
-        yaml_cfg = edict(yaml.load(f))
+        yaml_cfg = edict(yaml.load(f, Loader=yaml.FullLoader))
 
     _merge_a_into_b(yaml_cfg, opt)
     
@@ -154,7 +155,6 @@ if __name__ == '__main__':
     # os.environ["CUDA_VISIBLE_DEVICES"] = "2"
     opt = parse_args()
     logging.basicConfig(format='%(asctime)s %(message)s', level=logging.INFO)
-    opt.dataset = 'Charades'
     cfg_from_file(opt.dataset,opt)
 
     # lam_list = [1,0.1,10,0.01,100,0.001,0.0001]

@@ -26,7 +26,7 @@ class Model(nn.Module):
         self.vocab = vocab
         self.GRU = TextEncoderGRU(opt)
         self.loss = Criterion(opt)
-        self.match_map = get_window_list(opt.layers,opt.kernel_size,opt.stride,opt.temporal_scale)
+        self.match_map = get_window_list(opt.layers,opt.kernel_size,opt.stride,opt.temporal_scale,opt.start_layer)
         self.iou_map = get_iou_list(self.match_map)
 
     def forward(self, videos, words, w_len, writer, iters, lam):

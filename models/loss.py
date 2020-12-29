@@ -445,19 +445,22 @@ class Criterion(nn.Module): #local
             w_mask = w_mask.unsqueeze(0).repeat(b,1)
             score = []
             v_tmp = video.clone()
+            cnt = 0
             for layer in self.conv:
                 v_tmp = layer(v_tmp).relu()
-                v = self.conv_1d(v_tmp) # [b,c,l]
-                v = v.transpose(1,2) # [b,c,l] -> [b,l,c]
-                v_s = frame_by_word(v,None,word,w_mask,self.opt)
-                v = l2norm(v,dim=-1)
-                v_s = l2norm(v_s,dim=-1)
-                sim = torch.cosine_similarity(v,v_s,dim=-1) # [b,l,c] -> [b,l]
+                if cnt >= self.opt.start_layer - 1:
+                    v = self.conv_1d(v_tmp) # [b,c,l]
+                    v = v.transpose(1,2) # [b,c,l] -> [b,l,c]
+                    v_s = frame_by_word(v,None,word,w_mask,self.opt)
+                    v = l2norm(v,dim=-1)
+                    v_s = l2norm(v_s,dim=-1)
+                    sim = torch.cosine_similarity(v,v_s,dim=-1) # [b,l,c] -> [b,l]
 
-                # tmp = sim[i]
-                # for j in range(len(tmp)-1):
-                #     smooth += (tmp[j+1] - tmp[j])**2
-                score.append(sim) # [b,l]
+                    # tmp = sim[i]
+                    # for j in range(len(tmp)-1):
+                    #     smooth += (tmp[j+1] - tmp[j])**2
+                    score.append(sim) # [b,l]
+                cnt += 1
             
             score = torch.cat(score,dim=1)
             postive_map.append(score[i])

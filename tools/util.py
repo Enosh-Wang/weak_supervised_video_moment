@@ -29,7 +29,7 @@ def get_match_map(tscale, start_ratio, end_ratio):
     match_map = np.reshape(match_map, [-1, 2])  # [0,2] [1,3] [2,4].....[99,101]   # duration x start
     return match_map  # duration is same in row, start is same in col
 
-def get_window_list(layer_num,kenerl_size,stride,t_scale):
+def get_window_list(layer_num,kenerl_size,stride,t_scale,start_layer):
 
     # first layer
     r = 1 # receptive field
@@ -41,10 +41,11 @@ def get_window_list(layer_num,kenerl_size,stride,t_scale):
         r = r+(k-1)*(s**i)
         l = (l-k)//s+1
         s_i = s**(i+1)
-        for j in range(l):
-            xmin = s_i*j
-            xmax = r + s_i*j
-            window_list.append([xmin,xmax])
+        if i >= start_layer-1:
+            for j in range(l):
+                xmin = s_i*j
+                xmax = r + s_i*j
+                window_list.append([xmin,xmax])
     window_list = np.asarray(window_list)/t_scale
     return window_list
 
