@@ -142,18 +142,18 @@ class Criterion_local(nn.Module): #local_global
         l = opt.layers
         s = opt.stride
 
-        self.conv = nn.ModuleList(
+        self.conv_v = nn.ModuleList(
             [nn.Conv1d(opt.video_dim, opt.joint_dim, k, padding=0, stride = s)] # (k - 1) // 2
         )
 
         for _ in range(l - 1):
-            self.conv.append(nn.Conv1d(opt.joint_dim, opt.joint_dim, k, padding=0, stride = s))
+            self.conv_v.append(nn.Conv1d(opt.joint_dim, opt.joint_dim, k, padding=0, stride = s))
         
         
         self.conv_1d = nn.Conv1d(opt.joint_dim, opt.joint_dim, kernel_size=1)
         self.conv_g1d = nn.Conv1d(opt.joint_dim, opt.joint_dim, kernel_size=k)
 
-    def forward(self, video, words, w_masks, sentences, writer, iters, lam):
+    def forward(self, video, words, w_masks, sentences, writer, iters, lam, epoch):
 
         # words[b,l,c]
         video = video.transpose(1,2) #[b,l,c] -> [b,c,l]
@@ -171,7 +171,7 @@ class Criterion_local(nn.Module): #local_global
             sentence = sentence.unsqueeze(0).repeat(b,1)
             score = []
             v_tmp = video.clone()
-            for layer in self.conv:
+            for layer in self.conv_v:
                 v_tmp = layer(v_tmp).relu()
                 v = self.conv_1d(v_tmp) # [b,c,l]
                 v = v.transpose(1,2) # [b,c,l] -> [b,l,c]
@@ -196,16 +196,16 @@ class Criterion_local(nn.Module): #local_global
         local_loss = diag(scores,self.opt.global_margin)
         global_loss = diag(g_scores,self.opt.global_margin)
 
-        threshold = -1
+        threshold = self.opt.start_local
         
         if self.training and iters % self.opt.log_step == 0:
-            if iters > threshold:
-                writer.add_scalar('local_loss',local_loss,iters)
-            else:
+            if epoch < threshold:
                 writer.add_scalar('global_loss',global_loss,iters)
+            else:
+                writer.add_scalar('local_loss',local_loss,iters)
             # writer.add_scalar('negative_loss',negative_loss,iters)
 
-        if iters < threshold:
+        if epoch < threshold:
             loss = global_loss
         else:
             loss = local_loss
@@ -465,10 +465,10 @@ class Criterion(nn.Module): #local
             score = torch.cat(score,dim=1)
             postive_map.append(score[i])
             
-            score_map.append(score.max(dim=1)[0])
+            # score_map.append(score.max(dim=1)[0])
             # score_map.append(score.mean(dim=1))
-            # score = get_video_score_nms_list(score,lam,iou_map,i)
-            # score_map.append(score)
+            score = get_video_score_nms_list(score,lam,iou_map,i)
+            score_map.append(score)
         postive_map = torch.stack(postive_map) # [b,l]
         scores = torch.stack(score_map) # [b,b]
 

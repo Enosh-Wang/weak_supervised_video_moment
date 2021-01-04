@@ -29,12 +29,12 @@ class Model(nn.Module):
         self.match_map = get_window_list(opt.layers,opt.kernel_size,opt.stride,opt.temporal_scale,opt.start_layer)
         self.iou_map = get_iou_list(self.match_map)
 
-    def forward(self, videos, words, w_len, writer, iters, lam):
+    def forward(self, videos, words, w_len, writer, iters, lam, epoch):
         
         # 文本特征提取
         sentences, words, w_mask= self.GRU(words,w_len) # -> [b,c]
 
         # 创建正负样本对，模态交互
-        triplet_loss, postive= self.loss(videos,words,w_mask,sentences,writer,iters,lam,self.iou_map)
+        triplet_loss, postive= self.loss(videos,words,w_mask,sentences,writer,iters,lam,self.iou_map,epoch)
 
         return postive, triplet_loss

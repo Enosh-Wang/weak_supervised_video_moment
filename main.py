@@ -21,7 +21,7 @@ def parse_args():
                         help='Path to saved vocabulary pickle files.')
     parser.add_argument('--glove_path', default='/home/share/wangyunxiao/Glove/glove.840B.300d/glove.840B.300d.pkl',
                         help='Path to saved vocabulary pickle files.')
-    parser.add_argument('--num_epochs', default=10, type=int)
+    parser.add_argument('--num_epochs', default=20, type=int)
     parser.add_argument('--learning_rate', default=.01, type=float) # 论文中设为0.001
     parser.add_argument('--weight_decay', default=0.0001, type=float)
     parser.add_argument('--lr_update', default=20, type=int) # 论文中为15
@@ -94,6 +94,7 @@ def parse_args():
     parser.add_argument('--neg_num', default=3, type=int)
     parser.add_argument('--smooth_lam', default=1, type=float)
     parser.add_argument('--start_layer', default=1, type=float)
+    parser.add_argument('--start_local', default=10, type=int)
     args = parser.parse_args()
     return args
 
@@ -152,7 +153,7 @@ def cfg_from_file(dataset,opt):
     
 
 if __name__ == '__main__':
-    # os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
     opt = parse_args()
     logging.basicConfig(format='%(asctime)s %(message)s', level=logging.INFO)
     cfg_from_file(opt.dataset,opt)

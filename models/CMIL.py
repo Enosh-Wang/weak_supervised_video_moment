@@ -1,6 +1,5 @@
 import numpy as np
 import torch
-from tools.util import iou_with_anchors
 import time
 def get_lambda(iters, max_iter, continuation_func): # 原版函数应当是适用于 max_iter=20 的情况
     if continuation_func == 'Linear':
@@ -15,8 +14,30 @@ def get_lambda(iters, max_iter, continuation_func): # 原版函数应当是适�
     elif continuation_func == 'Exp':
         lam = np.exp((iters-max_iter)/4) #2000
     return lam
-    
+
 def get_video_score_nms_list(scores, lam, iou_maps, p_ind):
+    
+    # score [b,d*t]
+    # 对得分从大到小排序，并筛掉非法的部分
+    inds = torch.argmax(scores, dim=1).detach().cpu().numpy()
+    batch,length = scores.size()
+    length = max(int(length*(1-lam)),1)
+
+    v_score = []
+    for i in range(batch):
+    # 取合法部分的均值作为视频整体的得分
+        ind = inds[i]
+        score = scores[i]
+        iou_map = iou_maps[ind]
+        temp = list(zip(iou_map,score))
+        temp.sort(key=lambda x: (-x[0],-x[1]))
+        score_sorted = [item[1] for item in temp]
+        score_sorted = torch.stack(score_sorted)
+        v_score.append(torch.mean(score_sorted[:length]))
+
+    return torch.stack(v_score)#, neg_score
+
+def get_video_score_nms_list1(scores, lam, iou_maps, p_ind):
     
     # score [b,d*t]
     # 对得分从大到小排序，并筛掉非法的部分
@@ -96,7 +117,13 @@ def get_video_score_nms_all(score, lam, iou_maps, orders):
     return torch.stack(video_score)
 
 
-
+if __name__ == "__main__":
+    scores = torch.rand(32,25)
+    lam = 0.3
+    iou_maps = np.random.rand(25,25)
+    p_ind = 0
+    get_video_score_nms_list(scores, lam, iou_maps, p_ind)
+    
 
 
 
