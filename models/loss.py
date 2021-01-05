@@ -330,7 +330,7 @@ class Criterion_layers(nn.Module): # cat_layers
 
         return loss, postive_map
 
-class Criterion(nn.Module): # cat_fusion
+class Criterion_siamese(nn.Module): # 
     def __init__(self, opt):
         super().__init__()
         self.opt = opt
@@ -416,7 +416,7 @@ def pem_cls_loss_func(pred_score, gt_iou_map, mask):
     loss = -1 * torch.sum(loss_pos + loss_neg) / num_entries
     return loss
 
-class Criterion_lo(nn.Module): #local
+class Criterion(nn.Module): #local
     def __init__(self, opt):
         super().__init__()
         self.opt = opt
@@ -455,8 +455,8 @@ class Criterion_lo(nn.Module): #local
             v_tmp = video.clone()
             cnt = 0
             for layer in self.conv:
-                v_short = F.max_pool1d(v_tmp,self.opt.kernel_size,self.opt.stride)
-                v_tmp = layer(v_tmp).relu()+v_short
+                # v_short = F.max_pool1d(v_tmp,self.opt.kernel_size,self.opt.stride)
+                v_tmp = layer(v_tmp).relu()#+v_short
                 if cnt >= self.opt.start_layer - 1:
                     v = self.conv_1d(v_tmp) # [b,c,l]
                     v = v.transpose(1,2) # [b,c,l] -> [b,l,c]
