@@ -32,8 +32,10 @@ class Runner(object):
             self.model = self.model.cuda()
             cudnn.benchmark = True
 
-        self.optimizer = torch.optim.SGD(self.get_param(), lr=opt.learning_rate,momentum=0.9)
-        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=opt.num_epochs, eta_min=opt.learning_rate/100)
+        self.optimizer_g = torch.optim.SGD(self.get_param_g(), lr=opt.learning_rate,momentum=0.9)
+        self.optimizer_l = torch.optim.SGD(self.get_param_l(), lr=opt.learning_rate,momentum=0.9)
+        self.scheduler_g = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer_g, T_max=opt.num_epochs//2, eta_min=opt.learning_rate/100)
+        self.scheduler_l = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer_l, T_max=opt.num_epochs//2, eta_min=opt.learning_rate/100)
         self.logger = SummaryWriter(os.path.join(opt.model_path,opt.model_name), flush_secs=5)
         self.iters = 0
         self.start_epoch = 0
@@ -53,12 +55,18 @@ class Runner(object):
 
         for epoch in range(self.start_epoch,self.opt.num_epochs):
             # train for one epoch
-            lam = get_lambda(epoch, self.opt.num_epochs, self.opt.continuation_func)
+            if epoch < self.opt.start_local:
+                lam = 0
+            else:
+                lam = get_lambda(epoch-self.opt.start_local, self.opt.num_epochs-self.opt.start_local, self.opt.continuation_func)
             self.train_one_epoch(train_loader, epoch, lam)
 
             # evaluate on validation set
             recall = self.validate(val_loader, lam)
-            self.scheduler.step()
+            if epoch < self.opt.start_local:
+                self.scheduler_g.step()
+            else:
+                self.scheduler_l.step()
             # remember best R@ sum and save checkpoint
             is_best = recall > self.max_recall
 
@@ -69,8 +77,10 @@ class Runner(object):
                 'opt': self.opt,
                 'iters': self.iters,
                 'model': self.model.state_dict(),
-                'optimizer':self.optimizer.state_dict(),
-                'scheduler':self.scheduler.state_dict(),
+                'optimizer_g': self.optimizer_g.state_dict(),
+                'optimizer_l': self.optimizer_l.state_dict(),
+                'scheduler_g': self.scheduler_g.state_dict(),
+                'scheduler_l': self.scheduler_l.state_dict()
             }, is_best, prefix=os.path.join(self.opt.model_path,self.opt.model_name))
     
     def train_one_epoch(self, train_loader, epoch, lam):
@@ -81,7 +91,7 @@ class Runner(object):
         self.model.train()
 
         end = time.time()
-        for i, (videos, sentences, sentence_lengths, index) in enumerate(train_loader):
+        for i, (videos, sentences, sentence_lengths, index, word_ids) in enumerate(train_loader):
             # measure data loading time
             data_time.update(time.time() - end)
             self.iters += 1
@@ -90,16 +100,23 @@ class Runner(object):
                 videos = videos.cuda()
                 sentences = sentences.cuda()
             
-            _,loss = self.model.forward(videos, sentences, sentence_lengths, self.logger, self.iters, lam)
+            _,loss = self.model.forward(videos, sentences, sentence_lengths, self.logger, self.iters, lam, epoch)
             
-            self.optimizer.zero_grad()
+            if epoch < self.opt.start_local:
+                self.optimizer_g.zero_grad()
+            else:
+                self.optimizer_l.zero_grad()
             # compute gradient and do SGD step
             loss.backward()
             
             if self.opt.grad_clip > 0:
                 # 正则化
                 torch.nn.utils.clip_grad.clip_grad_norm_(filter(lambda p: p.requires_grad, self.model.parameters()), self.opt.grad_clip)
-            self.optimizer.step()
+            
+            if epoch < self.opt.start_local:
+                self.optimizer_g.step()
+            else:
+                self.optimizer_l.step()
             
             # measure elapsed time
             batch_time.update(time.time() - end)
@@ -117,10 +134,12 @@ class Runner(object):
 
             # Record logs in tensorboard
             self.logger.add_scalar('epoch', epoch, global_step=self.iters)
-            self.logger.add_scalar('loss', loss, global_step=self.iters)
             self.logger.add_scalar('lam', lam, global_step=self.iters)
-            self.logger.add_scalar('lr', self.optimizer.param_groups[0]['lr'], global_step=self.iters)
-            
+            if epoch < self.opt.start_local:
+                self.logger.add_scalar('g_lr', self.optimizer_g.param_groups[0]['lr'], global_step=self.iters)
+            else:
+                self.logger.add_scalar('l_lr/g', self.optimizer_l.param_groups[0]['lr'], global_step=self.iters)
+                self.logger.add_scalar('l_lr/l', self.optimizer_l.param_groups[1]['lr'], global_step=self.iters)
     def validate(self, val_loader, lam):
 
         # switch to evaluate mode
@@ -130,13 +149,13 @@ class Runner(object):
         batch_time = AverageMeter()
         end = time.time()
         all_result = {}
-        for iters, (videos, sentences, sentence_lengths, index) in enumerate(val_loader):
+        for iters, (videos, sentences, sentence_lengths, index, word_ids) in enumerate(val_loader):
             if torch.cuda.is_available():
                 videos = videos.cuda()
                 sentences = sentences.cuda()
             # compute the embeddings
             with torch.no_grad():
-                confidence_map,loss = self.model.forward(videos, sentences, sentence_lengths, self.logger, self.iters, lam)
+                confidence_map,loss = self.model.forward(videos, sentences, sentence_lengths, self.logger, self.iters, lam, epoch)
             
             confidence_map = confidence_map.detach().cpu().numpy()
             batch_result = self.generate_proposal(confidence_map, self.match_map, index)
@@ -204,8 +223,10 @@ class Runner(object):
             self.iters = checkpoint['iters']
             self.model.load_state_dict(checkpoint['model'])
             
-            self.optimizer.load_state_dict(checkpoint['optimizer'])
-            self.scheduler.load_state_dict(checkpoint['scheduler'])
+            self.optimizer_g.load_state_dict(checkpoint['optimizer_g'])
+            self.optimizer_l.load_state_dict(checkpoint['optimizer_l'])
+            self.scheduler_g.load_state_dict(checkpoint['scheduler_g'])
+            self.scheduler_l.load_state_dict(checkpoint['scheduler_l'])
             
             print("=> loaded checkpoint '{}' (epoch {}, max_recall {})"
                 .format(self.opt.resume, self.start_epoch, self.max_recall))
@@ -237,14 +258,14 @@ class Runner(object):
         end = time.time()
         all_result = {}
         lam = 0#get_lambda(self.opt.num_epochs,self.opt.num_epochs,self.opt.continuation_func)
-        for iters, (videos, sentences, sentence_lengths, index) in enumerate(test_loader):
+        for iters, (videos, sentences, sentence_lengths, index, word_ids ) in enumerate(test_loader):
             if torch.cuda.is_available():
                 videos = videos.cuda()
                 sentences = sentences.cuda()
             # compute the embeddings
             with torch.no_grad():
                 self.iters += 1
-                confidence_map,loss = self.model.forward(videos, sentences, sentence_lengths, self.logger, self.iters, lam)
+                confidence_map,loss = self.model.forward(videos, sentences, sentence_lengths, self.logger, self.iters, lam, epoch)
 
             confidence_map = confidence_map.detach().cpu().numpy()
             plot_map(confidence_map,index,self.opt)
@@ -346,17 +367,20 @@ class Runner(object):
 
         return grouped_parameters
 
-    def get_param(self):
-        video = []
-        others = []
-        for n,m in self.model.named_parameters():
-            if m.requires_grad == True:
-                if 'conv_v' in n:
-                    video.append(m)
-                else:
-                    others.append(m)
-        grouped_parameters = [{'params': video},
-                              {'params': others}]
+    def get_param_g(self):
+
+        grouped_parameters= [{'params': self.model.GRU.parameters()},
+                            {'params': self.model.loss.conv_v.parameters()},
+                            {'params': self.model.loss.conv_g1d.parameters()}]
+
+        return grouped_parameters 
+
+    def get_param_l(self):
+        param = list(self.model.GRU.parameters())
+        param += list(self.model.loss.conv_v.parameters())
+
+        grouped_parameters = [{'params': param, 'lr': self.opt.learning_rate/100},
+                            {'params': self.model.loss.conv_1d.parameters()}]
 
         return grouped_parameters
     
