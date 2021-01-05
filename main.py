@@ -39,28 +39,12 @@ def parse_args():
                         help='Dimensionality of the video embedding.')
     parser.add_argument('--temporal_scale', default=31, type=int,
                         help='ActivityNet=100，Charades=20') # 视频时序长度
-    parser.add_argument('--prop_boundary_ratio', default=0.5, type=float) # proposal拓展率
-    parser.add_argument('--start_ratio', default=0, type=float) # proposal拓展率
-    parser.add_argument('--end_ratio', default=0.5, type=float) # proposal拓展率
-    parser.add_argument('--num_sample', default=6, type=int,
-                        help='ActivityNet=32，Charades=6') # 采样点数目
-    parser.add_argument('--num_sample_perbin', default=3, type=int) #  子采样点数目
     parser.add_argument('--post_process_thread', default=4, type=int)
     parser.add_argument('--soft_nms_alpha', type=float, default=0.4)
     parser.add_argument('--soft_nms_low_thres',type=float,default=0.5)
     parser.add_argument('--soft_nms_high_thres',type=float,default=0.9)
     parser.add_argument('--raw_feature_norm', default="no_norm",
                         help='clipped_l2norm|l2norm|clipped_l1norm|l1norm|no_norm|softmax')
-    parser.add_argument('--sentence_heads', default=4, type=int,
-                        help='')
-    parser.add_argument('--video_heads', default=8, type=int,
-                        help='')
-    parser.add_argument('--num_sets', default=12, type=int,
-                        help='')
-    parser.add_argument('--sentence_attn_layers', default=1, type=int,
-                        help='')
-    parser.add_argument('--video_attn_layers', default=1, type=int,
-                        help='')
     parser.add_argument('--grad_clip', default=5., type=float,
                         help='Gradient clipping threshold.')
     parser.add_argument('--dropout', default=0, type=float,
@@ -83,11 +67,6 @@ def parse_args():
                         help='LogSumExp|Mean|Max|Sum')
     parser.add_argument('--continuation_func', default="Log",
                         help='Linear|Plinear|Sigmoid|Log|Exp')
-    parser.add_argument('--model_mode', default="image_IMRAM", type=str,
-                        help='full_IMRAM|text_IMRAM')
-    parser.add_argument('--iteration_step', default=3, type=int,
-                        help='routing_step')
-    parser.add_argument('--dilation_rate', default=1, type=int)
     parser.add_argument('--layers', default=4, type=int)
     parser.add_argument('--kernel_size', default=3, type=int)
     parser.add_argument('--stride', default=2, type=int)
@@ -152,7 +131,7 @@ def cfg_from_file(dataset,opt):
     
 
 if __name__ == '__main__':
-    # os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
     opt = parse_args()
     logging.basicConfig(format='%(asctime)s %(message)s', level=logging.INFO)
     cfg_from_file(opt.dataset,opt)

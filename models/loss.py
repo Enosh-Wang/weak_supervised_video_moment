@@ -330,7 +330,7 @@ class Criterion_layers(nn.Module): # cat_layers
 
         return loss, postive_map
 
-class Criterion_fusion(nn.Module): # cat_fusion
+class Criterion(nn.Module): # cat_fusion
     def __init__(self, opt):
         super().__init__()
         self.opt = opt
@@ -342,15 +342,15 @@ class Criterion_fusion(nn.Module): # cat_fusion
         self.fc = nn.Linear(opt.video_dim, opt.joint_dim)
 
         self.conv = nn.ModuleList(
-            [nn.Conv1d(opt.joint_dim*2, opt.joint_dim, k, padding=0, stride = s)] # (k - 1) // 2
+            [nn.Conv1d(opt.joint_dim, opt.joint_dim, k, padding=0, stride = s)] # (k - 1) // 2
         )
 
         for _ in range(l - 1):
             self.conv.append(nn.Conv1d(opt.joint_dim, opt.joint_dim, k, padding=0, stride = s))
         
-        self.conv_1d = nn.Conv1d(2*opt.joint_dim, 1, kernel_size=1)
+        self.conv_1d = nn.Conv1d(opt.joint_dim, opt.joint_dim, kernel_size=1)
 
-    def forward(self, video, words, w_masks, sentences, writer, iters, lam):
+    def forward(self, video, words, w_masks, sentences, writer, iters, lam, iou_map):
 
         # words[b,l,c]
         video = self.fc(video)
@@ -365,13 +365,18 @@ class Criterion_fusion(nn.Module): # cat_fusion
             word = word.unsqueeze(0).repeat(b,1,1) # [l,c] -> [b,l,c]
             w_mask = w_mask.unsqueeze(0).repeat(b,1)
 
-            v_s = frame_by_word(video,None,word,w_mask,self.opt)
-            feature = torch.cat([video,v_s],dim=-1).transpose(1,2)
+            v_s = frame_by_word(video,None,word,w_mask,self.opt).transpose(1,2)
+            v = video.clone().transpose(1,2)
 
             score = []
             for layer in self.conv:
-                feature = layer(feature).relu()
-                sim = self.conv_1d(feature).squeeze(1).sigmoid() # [b,l]
+                v_short = F.max_pool1d(v,self.opt.kernel_size,self.opt.stride)
+                v_s_short = F.max_pool1d(v_s,self.opt.kernel_size,self.opt.stride)
+                v = layer(v).relu()+v_short
+                v_s = layer(v_s).relu()+v_s_short
+                v_p = self.conv_1d(v)
+                v_s_p = self.conv_1d(v_s) # [b,c,l]
+                sim = torch.cosine_similarity(v_p,v_s_p,dim=1) # [b,l]
                 score.append(sim) # [b,l]
 
             score = torch.cat(score,dim=1)
@@ -411,7 +416,7 @@ def pem_cls_loss_func(pred_score, gt_iou_map, mask):
     loss = -1 * torch.sum(loss_pos + loss_neg) / num_entries
     return loss
 
-class Criterion(nn.Module): #local
+class Criterion_lo(nn.Module): #local
     def __init__(self, opt):
         super().__init__()
         self.opt = opt
@@ -420,8 +425,10 @@ class Criterion(nn.Module): #local
         l = opt.layers
         s = opt.stride
 
+        self.fc = nn.Linear(opt.video_dim,opt.joint_dim)
+
         self.conv = nn.ModuleList(
-            [nn.Conv1d(opt.video_dim, opt.joint_dim, k, padding=0, stride = s)] # (k - 1) // 2
+            [nn.Conv1d(opt.joint_dim, opt.joint_dim, k, padding=0, stride = s)] # (k - 1) // 2
         )
 
         for _ in range(l - 1):
@@ -432,6 +439,7 @@ class Criterion(nn.Module): #local
     def forward(self, video, words, w_masks, sentences, writer, iters, lam, iou_map):
 
         # words[b,l,c]
+        video = self.fc(video)
         video = video.transpose(1,2) #[b,l,c] -> [b,c,l]
         b = video.size(0)
         postive_map = []
@@ -447,7 +455,8 @@ class Criterion(nn.Module): #local
             v_tmp = video.clone()
             cnt = 0
             for layer in self.conv:
-                v_tmp = layer(v_tmp).relu()
+                v_short = F.max_pool1d(v_tmp,self.opt.kernel_size,self.opt.stride)
+                v_tmp = layer(v_tmp).relu()+v_short
                 if cnt >= self.opt.start_layer - 1:
                     v = self.conv_1d(v_tmp) # [b,c,l]
                     v = v.transpose(1,2) # [b,c,l] -> [b,l,c]
@@ -554,3 +563,97 @@ class Criterion1(nn.Module): #local
             writer.add_scalar('loss',loss,iters)
     
         return loss, postive_map
+
+class Criterion_unet(nn.Module): #local
+    def __init__(self, opt):
+        super().__init__()
+        self.opt = opt
+
+        k = opt.kernel_size
+        l = opt.layers
+        s = opt.stride
+
+        self.fc = nn.Linear(opt.video_dim,opt.joint_dim)
+
+        self.conv = nn.ModuleList(
+            [nn.Conv1d(opt.joint_dim, opt.joint_dim, k, padding=0, stride = s)] # (k - 1) // 2
+        )
+
+        self.trans_conv = nn.ModuleList(
+            [nn.ConvTranspose1d(opt.joint_dim,opt.joint_dim,k,stride=s,padding=0)]
+        )
+
+        for _ in range(l - 1):
+            self.conv.append(nn.Conv1d(opt.joint_dim, opt.joint_dim, k, padding=0, stride = s))
+            self.trans_conv.append(nn.ConvTranspose1d(opt.joint_dim,opt.joint_dim,k,stride=s,padding=0))
+        
+        self.conv_a = nn.Conv1d(opt.joint_dim, opt.joint_dim, k, padding=0, stride = s)
+        self.conv_1d = nn.Conv1d(opt.joint_dim, opt.joint_dim, kernel_size=1)
+
+    def forward(self, video, words, w_masks, sentences, writer, iters, lam, iou_map):
+
+        # words[b,l,c]
+        video = self.fc(video)
+        video = video.transpose(1,2) #[b,l,c] -> [b,c,l]
+        b = video.size(0)
+        postive_map = []
+        score_map = []
+        # smooth = torch.tensor(0.).cuda()
+
+        for i in range(b):
+            word = words[i] # [l,c]
+            w_mask = w_masks[i]
+            word = word.unsqueeze(0).repeat(b,1,1) # [l,c] -> [b,l,c]
+            w_mask = w_mask.unsqueeze(0).repeat(b,1)
+            score = []
+            v_tmp = video.clone()
+            cnt = 0
+            
+            v_fore = []
+            for layer in self.conv:
+                # v_short = F.max_pool1d(v_tmp,self.opt.kernel_size,self.opt.stride)
+                v_tmp = layer(v_tmp).relu() # +v_short
+                v_fore.append(v_tmp)
+            
+            v_tmp = self.conv_a(v_tmp)
+            v_fore.reverse()
+            for layer,vf in zip(self.trans_conv,v_fore):
+                # v_short = F.interpolate(v_tmp,)
+                v_tmp = layer(v_tmp).relu() + vf
+
+                if cnt >= self.opt.start_layer - 1:
+                    v = self.conv_1d(v_tmp) # [b,c,l]
+                    v = v.transpose(1,2) # [b,c,l] -> [b,l,c]
+                    v_s = frame_by_word(v,None,word,w_mask,self.opt)
+                    v = l2norm(v,dim=-1)
+                    v_s = l2norm(v_s,dim=-1)
+                    sim = torch.cosine_similarity(v,v_s,dim=-1) # [b,l,c] -> [b,l]
+
+                    # tmp = sim[i]
+                    # for j in range(len(tmp)-1):
+                    #     smooth += (tmp[j+1] - tmp[j])**2
+                    score.append(sim) # [b,l]
+                cnt += 1
+            
+            score.reverse()
+            score = torch.cat(score,dim=1)
+            postive_map.append(score[i])
+            
+            score_map.append(score.max(dim=1)[0])
+            # score_map.append(score.mean(dim=1))
+            # score = get_video_score_nms_list(score,lam,iou_map,i)
+            # score_map.append(score)
+        postive_map = torch.stack(postive_map) # [b,l]
+        scores = torch.stack(score_map) # [b,b]
+
+        # sparse_loss = F.relu(postive_map).sum()/b
+
+        loss = diag(scores,self.opt.global_margin)
+
+        # smooth = smooth/b
+        if self.training and iters % self.opt.log_step == 0:
+            writer.add_scalar('loss',loss,iters)
+            # writer.add_scalar('smooth_loss',smooth,iters)
+            # writer.add_scalar('sparse_loss',sparse_loss,iters)
+    
+        return loss, postive_map #+smooth*self.opt.smooth_lam +sparse_loss*self.opt.smooth_lam

@@ -81,7 +81,7 @@ class Runner(object):
         self.model.train()
 
         end = time.time()
-        for i, (videos, sentences, sentence_lengths, index, word_ids) in enumerate(train_loader):
+        for i, (videos, sentences, sentence_lengths, index) in enumerate(train_loader):
             # measure data loading time
             data_time.update(time.time() - end)
             self.iters += 1
@@ -130,7 +130,7 @@ class Runner(object):
         batch_time = AverageMeter()
         end = time.time()
         all_result = {}
-        for iters, (videos, sentences, sentence_lengths, index, word_ids) in enumerate(val_loader):
+        for iters, (videos, sentences, sentence_lengths, index) in enumerate(val_loader):
             if torch.cuda.is_available():
                 videos = videos.cuda()
                 sentences = sentences.cuda()
@@ -244,7 +244,7 @@ class Runner(object):
         end = time.time()
         all_result = {}
         lam = 0#get_lambda(self.opt.num_epochs,self.opt.num_epochs,self.opt.continuation_func)
-        for iters, (videos, sentences, sentence_lengths, index, word_ids ) in enumerate(test_loader):
+        for iters, (videos, sentences, sentence_lengths, index) in enumerate(test_loader):
             if torch.cuda.is_available():
                 videos = videos.cuda()
                 sentences = sentences.cuda()

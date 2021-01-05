@@ -1,5 +1,5 @@
-temporal_scale: 31
+temporal_scale: 255
 video_dim: 4096
-layers: 3
+layers: 7
 dataset: TACoS
 batch_size: 32
