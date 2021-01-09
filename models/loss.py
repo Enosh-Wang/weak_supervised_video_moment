@@ -474,7 +474,10 @@ class Criterion(nn.Module): #local
             score = torch.cat(score,dim=1)
             postive_map.append(score[i])
             
-            # score_map.append(score.max(dim=1)[0])
+            # length = score.size(1)
+            # length = max(int(length*(1-lam)),1)
+            # score = score.sort(dim=1,descending=True)[0][:,:length]
+            # # score_map.append(score.max(dim=1)[0])
             # score_map.append(score.mean(dim=1))
             score = get_video_score_nms_list(score,lam,iou_map,i)
             score_map.append(score)

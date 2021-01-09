@@ -57,7 +57,7 @@ class Runner(object):
             self.train_one_epoch(train_loader, epoch, lam)
 
             # evaluate on validation set
-            recall = self.validate(val_loader, lam)
+            recall = self.validate(val_loader, lam, epoch)
             self.scheduler.step()
             # remember best R@ sum and save checkpoint
             is_best = recall > self.max_recall
@@ -121,7 +121,7 @@ class Runner(object):
             self.logger.add_scalar('lam', lam, global_step=self.iters)
             self.logger.add_scalar('lr', self.optimizer.param_groups[0]['lr'], global_step=self.iters)
             
-    def validate(self, val_loader, lam):
+    def validate(self, val_loader, lam, epoch):
 
         # switch to evaluate mode
         self.model.eval()
@@ -244,7 +244,7 @@ class Runner(object):
             # compute the embeddings
             with torch.no_grad():
                 self.iters += 1
-                confidence_map,loss = self.model.forward(videos, sentences, sentence_lengths, self.logger, self.iters, lam, epoch)
+                confidence_map,loss = self.model.forward(videos, sentences, sentence_lengths, self.logger, self.iters, lam, 0)
 
             confidence_map = confidence_map.detach().cpu().numpy()
             plot_map(confidence_map,index,self.opt)

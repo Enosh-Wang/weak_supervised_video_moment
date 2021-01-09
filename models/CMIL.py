@@ -29,11 +29,14 @@ def get_video_score_nms_list(scores, lam, iou_maps, p_ind):
         ind = inds[i]
         score = scores[i]
         iou_map = iou_maps[ind]
-        temp = list(zip(iou_map,score))
-        temp.sort(key=lambda x: (-x[0],-x[1]))
-        score_sorted = [item[1] for item in temp]
-        score_sorted = torch.stack(score_sorted)
-        v_score.append(torch.mean(score_sorted[:length]))
+        score_iou = score + torch.tensor(iou_map).cuda()
+        _,order = score_iou.sort(dim=0,descending=True)
+        score = score[order]
+        # temp = list(zip(iou_map,score))
+        # temp.sort(key=lambda x: (-x[0],-x[1]))
+        # score_sorted = [item[1] for item in temp]
+        # score_sorted = torch.stack(score_sorted)
+        v_score.append(torch.mean(score[:length]))
 
     return torch.stack(v_score)#, neg_score
 
