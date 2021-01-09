@@ -133,7 +133,7 @@ class Criterion_scdm(nn.Module): # scdm
             
         return loss, postive_map
 
-class Criterion(nn.Module): #local_global
+class Criterion_two(nn.Module): #local_global
     def __init__(self, opt):
         super().__init__()
         self.opt = opt
@@ -416,7 +416,7 @@ def pem_cls_loss_func(pred_score, gt_iou_map, mask):
     loss = -1 * torch.sum(loss_pos + loss_neg) / num_entries
     return loss
 
-class Criterion_lo(nn.Module): #local
+class Criterion(nn.Module): #local
     def __init__(self, opt):
         super().__init__()
         self.opt = opt
@@ -479,8 +479,8 @@ class Criterion_lo(nn.Module): #local
             # score = score.sort(dim=1,descending=True)[0][:,:length]
             # # score_map.append(score.max(dim=1)[0])
             # score_map.append(score.mean(dim=1))
-            # score = get_video_score_nms_list(score,lam,iou_map,i)
-            # score_map.append(score)
+            score = get_video_score_nms_list(score,lam,iou_map,i)
+            score_map.append(score)
         postive_map = torch.stack(postive_map) # [b,l]
         scores = torch.stack(score_map) # [b,b]
 

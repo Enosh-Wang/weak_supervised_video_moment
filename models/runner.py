@@ -90,7 +90,7 @@ class Runner(object):
                 videos = videos.cuda()
                 sentences = sentences.cuda()
             
-            _,loss = self.model.forward(videos, sentences, sentence_lengths, self.logger, self.iters, lam)
+            _,loss = self.model.forward(videos, sentences, sentence_lengths, self.logger, self.iters, lam, epoch)
             
             self.optimizer.zero_grad()
             # compute gradient and do SGD step
@@ -136,7 +136,7 @@ class Runner(object):
                 sentences = sentences.cuda()
             # compute the embeddings
             with torch.no_grad():
-                confidence_map,loss = self.model.forward(videos, sentences, sentence_lengths, self.logger, self.iters, lam)
+                confidence_map,loss = self.model.forward(videos, sentences, sentence_lengths, self.logger, self.iters, lam, epoch)
             
             confidence_map = confidence_map.detach().cpu().numpy()
             batch_result = self.generate_proposal(confidence_map, self.match_map, index)
