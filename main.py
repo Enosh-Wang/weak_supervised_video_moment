@@ -132,7 +132,7 @@ def cfg_from_file(dataset,opt):
     
 
 if __name__ == '__main__':
-    # os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+    # os.environ["CUDA_VISIBLE_DEVICES"] = "3"
     opt = parse_args()
     logging.basicConfig(format='%(asctime)s %(message)s', level=logging.INFO)
     cfg_from_file(opt.dataset,opt)
