@@ -100,7 +100,7 @@ class Criterion(nn.Module): # two_stage
         self.conv_1d = nn.Conv1d(opt.joint_dim, opt.joint_dim, kernel_size=1)
         self.conv_g1d = nn.Conv1d(opt.joint_dim, opt.joint_dim, kernel_size=k)
 
-    def forward(self, video, words, w_masks, sentences, writer, iters, lam, epoch):
+    def forward(self, video, words, w_masks, sentences, writer, iters, lam, epoch, iou_map):
 
         # words[b,l,c]
         video = self.fc(video)
