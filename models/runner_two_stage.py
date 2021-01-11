@@ -370,14 +370,16 @@ class Runner(object):
     def get_param_g(self):
 
         grouped_parameters= [{'params': self.model.GRU.parameters()},
-                            {'params': self.model.loss.conv_v.parameters()},
+                            {'params': self.model.loss.fc.parameters()},
+                            {'params': self.model.loss.conv.parameters()},
                             {'params': self.model.loss.conv_g1d.parameters()}]
 
         return grouped_parameters 
 
     def get_param_l(self):
         param = list(self.model.GRU.parameters())
-        param += list(self.model.loss.conv_v.parameters())
+        param += list(self.model.loss.fc.parameters())
+        param += list(self.model.loss.conv.parameters())
 
         grouped_parameters = [{'params': param, 'lr': self.opt.learning_rate/100},
                             {'params': self.model.loss.conv_1d.parameters()}]

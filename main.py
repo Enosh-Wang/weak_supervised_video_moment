@@ -1,7 +1,7 @@
 import os
 import logging
 import argparse
-from models.runner import Runner
+from models.runner_two_stage import Runner
 from tools.vocab import Vocabulary
 from easydict import EasyDict as edict
 import yaml
