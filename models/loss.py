@@ -138,9 +138,9 @@ class Criterion(nn.Module): # two_stage
             
             score = torch.cat(score,dim=1)
             postive_map.append(score[i])
-            g_v = l2norm(self.conv_g1d(v).squeeze(),dim=-1)
+            g_v = l2norm(self.conv_g1d(v).squeeze(-1),dim=-1)
             # g_score = torch.cosine_similarity(g_v,sentence,dim=-1) # [b,c] -> [b]
-            g_s = l2norm(self.conv_g1d(v_s).squeeze(),dim=-1)
+            g_s = l2norm(self.conv_g1d(v_s).squeeze(-1),dim=-1)
             g_score = torch.cosine_similarity(g_v,g_s,dim=1)
 
             # score_map.append(score.max(dim=1)[0])
