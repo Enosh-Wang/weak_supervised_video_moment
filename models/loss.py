@@ -143,7 +143,9 @@ class Criterion(nn.Module): # two_stage
             g_s = l2norm(self.conv_g1d(v_s).squeeze(),dim=-1)
             g_score = torch.cosine_similarity(g_v,g_s,dim=1)
 
-            score_map.append(score.max(dim=1)[0])
+            # score_map.append(score.max(dim=1)[0])
+            score = get_video_score_nms_list(score,lam,iou_map,i)
+            score_map.append(score)
             g_score_map.append(g_score)
 
         postive_map = torch.stack(postive_map) # [b,l]

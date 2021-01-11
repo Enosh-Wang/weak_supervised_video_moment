@@ -29,7 +29,7 @@ def get_video_score_nms_list(scores, lam, iou_maps, p_ind):
         ind = inds[i]
         score = scores[i]
         iou_map = iou_maps[ind]
-        score_iou = score + torch.tensor(iou_map).cuda()
+        score_iou = score * torch.tensor(iou_map).cuda()
         _,order = score_iou.sort(dim=0,descending=True)
         score = score[order]
         # temp = list(zip(iou_map,score))
