@@ -79,7 +79,7 @@ def diag(scores, margin):
 
     return cost_s.sum()/b + cost_im.sum()/b
 
-class Criterion(nn.Module): # two_stage
+class Criterion_two(nn.Module): # two_stage
     def __init__(self, opt):
         super().__init__()
         self.opt = opt
@@ -143,9 +143,9 @@ class Criterion(nn.Module): # two_stage
             g_s = l2norm(self.conv_g1d(v_s).squeeze(-1),dim=-1)
             g_score = torch.cosine_similarity(g_v,g_s,dim=1)
 
-            # score_map.append(score.max(dim=1)[0])
-            score = get_video_score_nms_list(score,lam,iou_map,i)
-            score_map.append(score)
+            score_map.append(score.max(dim=1)[0])
+            # score = get_video_score_nms_list(score,lam,iou_map,i)
+            # score_map.append(score)
             g_score_map.append(g_score)
 
         postive_map = torch.stack(postive_map) # [b,l]
@@ -170,7 +170,7 @@ class Criterion(nn.Module): # two_stage
             loss = local_loss
         return loss, postive_map
 
-class Criterion_siamese(nn.Module): # 
+class Criterion_d(nn.Module): # 
     def __init__(self, opt):
         super().__init__()
         self.opt = opt
@@ -190,7 +190,7 @@ class Criterion_siamese(nn.Module): #
         
         self.conv_1d = nn.Conv1d(opt.joint_dim, opt.joint_dim, kernel_size=1)
 
-    def forward(self, video, words, w_masks, sentences, writer, iters, lam, iou_map):
+    def forward(self, video, words, w_masks, sentences, writer, iters, lam, epoch, iou_map):
 
         # words[b,l,c]
         video = self.fc(video)
@@ -221,7 +221,9 @@ class Criterion_siamese(nn.Module): #
 
             score = torch.cat(score,dim=1)
             postive_map.append(score[i])
-            score_map.append(score.max(dim=1)[0])
+            score = get_video_score_nms_list(score,lam,iou_map,i)
+            score_map.append(score)
+            # score_map.append(score.max(dim=1)[0])
 
         postive_map = torch.stack(postive_map) # [b,l]
         scores = torch.stack(score_map) # [b,b]
@@ -382,3 +384,111 @@ class Criterion1(nn.Module): #local
             writer.add_scalar('loss',loss,iters)
     
         return loss, postive_map
+
+
+class Criterion(nn.Module): # two_stage_BN
+    def __init__(self, opt):
+        super().__init__()
+        self.opt = opt
+
+        k = opt.kernel_size
+        l = opt.layers
+        s = opt.stride
+
+        self.fc = nn.Linear(opt.video_dim, opt.joint_dim)
+
+        self.conv = nn.ModuleList(
+            [nn.Conv1d(opt.joint_dim, opt.joint_dim, k, padding=0, stride = s)] # (k - 1) // 2
+        )
+
+        for _ in range(l - 1):
+            self.conv.append(nn.Conv1d(opt.joint_dim, opt.joint_dim, k, padding=0, stride = s))
+        
+        self.conv_1d = nn.Conv1d(opt.joint_dim, opt.joint_dim, kernel_size=1)
+        self.conv_g1d = nn.Conv1d(opt.joint_dim, opt.joint_dim, kernel_size=k)
+
+        self.norm_v = nn.BatchNorm1d(opt.joint_dim,affine=False)
+        self.norm_w = nn.BatchNorm1d(opt.joint_dim,affine=False)
+
+    def forward(self, video, words, w_masks, sentences, writer, iters, lam, epoch, iou_map):
+
+        # words[b,l,c]
+        video = self.fc(video)
+        b = video.size(0)
+        postive_map = []
+        score_map = []
+        g_score_map = []
+
+        for i in range(b):
+            word = words[i] # [l,c]
+            w_mask = w_masks[i]
+            # sentence = sentences[i]
+
+            word = word.unsqueeze(0).repeat(b,1,1) # [l,c] -> [b,l,c]
+            w_mask = w_mask.unsqueeze(0).repeat(b,1)
+            # sentence = sentence.unsqueeze(0).repeat(b,1)
+            
+            v_s = frame_by_word(video,None,word,w_mask,self.opt).transpose(1,2)
+            v = video.clone().transpose(1,2)
+
+            #score = []
+            v_l = []
+            v_s_l = []
+
+            for layer in self.conv:
+                v_short = F.max_pool1d(v,self.opt.kernel_size,self.opt.stride)
+                v_s_short = F.max_pool1d(v_s,self.opt.kernel_size,self.opt.stride)
+                v = layer(v).relu()+v_short
+                v_s = layer(v_s).relu()+v_s_short
+
+                v_l.append(v)
+                v_s_l.append(v_s)
+                # v_p = self.conv_1d(v) # [b,c,l]
+                # v_s_p = self.conv_1d(v_s)
+                
+                # # v = l2norm(v,dim=-1)
+                # # v_s = l2norm(v_s,dim=-1)
+                # sim = torch.cosine_similarity(v_p,v_s_p,dim=1) # [b,l,c] -> [b,l]
+                # score.append(sim) # [b,l]
+            
+            v_l = torch.cat(v_l,dim=-1)
+            v_s_l = torch.cat(v_s_l,dim=-1)
+            v_l = self.norm_v(v_l)
+            v_s_l = self.norm_w(v_s_l)
+            v_l = self.conv_1d(v_l)
+            v_s_l = self.conv_1d(v_s_l)
+            score = torch.cosine_similarity(v_l,v_s_l,dim=1)
+            #score = torch.cat(score,dim=1)
+            postive_map.append(score[i])
+            g_v = l2norm(self.conv_g1d(v).squeeze(-1),dim=-1)
+            # g_score = torch.cosine_similarity(g_v,sentence,dim=-1) # [b,c] -> [b]
+            g_s = l2norm(self.conv_g1d(v_s).squeeze(-1),dim=-1)
+            g_score = torch.cosine_similarity(g_v,g_s,dim=1)
+
+            score_map.append(score.max(dim=1)[0])
+            # score = get_video_score_nms_list(score,lam,iou_map,i)
+            # score_map.append(score)
+            g_score_map.append(g_score)
+
+        postive_map = torch.stack(postive_map) # [b,l]
+        scores = torch.stack(score_map) # [b,b]
+        g_scores = torch.stack(g_score_map)
+
+        local_loss = diag(scores,self.opt.global_margin)
+        global_loss = diag(g_scores,self.opt.global_margin)
+
+        threshold = self.opt.start_local
+        
+        if self.training and iters % self.opt.log_step == 0:
+            if epoch < threshold:
+                writer.add_scalar('global_loss',global_loss,iters)
+            else:
+                writer.add_scalar('local_loss',local_loss,iters)
+            # writer.add_scalar('negative_loss',negative_loss,iters)
+
+        if epoch < threshold:
+            loss = global_loss
+        else:
+            loss = local_loss
+        return loss, postive_map
+
