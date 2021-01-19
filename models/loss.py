@@ -405,6 +405,7 @@ class Criterion(nn.Module): # two_stage_BN
             self.conv.append(nn.Conv1d(opt.joint_dim, opt.joint_dim, k, padding=0, stride = s))
         
         self.conv_1d = nn.Conv1d(opt.joint_dim, opt.joint_dim, kernel_size=1)
+        self.conv_s1d = nn.Conv1d(opt.joint_dim, opt.joint_dim, kernel_size=1)
         self.conv_g1d = nn.Conv1d(opt.joint_dim, opt.joint_dim, kernel_size=k)
 
         self.norm_v = nn.BatchNorm1d(opt.joint_dim,affine=False)
@@ -456,7 +457,7 @@ class Criterion(nn.Module): # two_stage_BN
             # v_l = self.norm_v(v_l)
             # v_s_l = self.norm_w(v_s_l)
             v_l = self.conv_1d(v_l)
-            v_s_l = self.conv_1d(v_s_l)
+            v_s_l = self.conv_s1d(v_s_l)
             v_l = self.norm_v(v_l)
             v_s_l = self.norm_w(v_s_l)
             score = torch.cosine_similarity(v_l,v_s_l,dim=1)

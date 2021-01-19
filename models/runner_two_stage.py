@@ -382,7 +382,8 @@ class Runner(object):
         param += list(self.model.loss.conv.parameters())
 
         grouped_parameters = [{'params': param, 'lr': self.opt.learning_rate/100},
-                            {'params': self.model.loss.conv_1d.parameters()}]
+                            {'params': self.model.loss.conv_1d.parameters()}
+                            {'params': self.model.loss.conv_s1d.parameters()}]
 
         return grouped_parameters
     
